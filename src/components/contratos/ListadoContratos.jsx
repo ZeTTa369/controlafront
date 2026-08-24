@@ -15,42 +15,18 @@ import {
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
 
-// Datos de prueba iniciales (fallback si la API falla o está vacía)
-const CONTRATOS_INICIALES = [
-  {
-    id_contrato: 1,
-    departamentoNombre: 'Torre Zafiro Platinum - Unidad 101',
-    inquilinoNombre: 'Ana María Rojas (CI: 8521479)',
-    fecha_inicio: '2026-01-01',
-    fecha_fin: '2026-12-31',
-    monto_renta: 450.00,
-    moneda: 'BOB',
-    garantia: 450.00,
-    estado: 'ACTIVO',
-  },
-  {
-    id_contrato: 2,
-    departamentoNombre: 'Condominio El Bosque - PB-2',
-    inquilinoNombre: 'Luis Fernando Ortiz (CI: 6325874)',
-    fecha_inicio: '2025-06-01',
-    fecha_fin: '2026-06-01',
-    monto_renta: 350.00,
-    moneda: 'BOB',
-    garantia: 350.00,
-    estado: 'POR_VENCER',
-  },
-  {
-    id_contrato: 3,
-    departamentoNombre: 'Torre Zafiro Platinum - Unidad 4B',
-    inquilinoNombre: 'Carlos Mendoza (CI: 7845123)',
-    fecha_inicio: '2024-01-01',
-    fecha_fin: '2025-01-01',
-    monto_renta: 750.00,
-    moneda: 'BOB',
-    garantia: 750.00,
-    estado: 'FINALIZADO',
-  },
-];
+// Helper para convertir cualquier fecha a formato DD/MM/YYYY
+const formatFechaDMY = (strFecha) => {
+  if (!strFecha) return 'N/A';
+  try {
+    const soloFecha = strFecha.split('T')[0];
+    const [y, m, d] = soloFecha.split('-');
+    if (!y || !m || !d) return strFecha;
+    return `${d}/${m}/${y}`;
+  } catch (e) {
+    return strFecha;
+  }
+};
 
 export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) {
   const [contratos, setContratos] = useState([]);
@@ -69,7 +45,6 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
   const cargarTodo = async () => {
     setLoading(true);
     try {
-      // Peticiones paralelas para traer los catálogos y contratos
       const [resContratos, resDeptos, resEdificios, resUsers] = await Promise.all([
         fetch(`${BASE_URL}/contratos`, { headers: getAuthHeaders() }),
         fetch(`${BASE_URL}/departamentos`, { headers: getAuthHeaders() }),
@@ -82,7 +57,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
       const dataEdificios = await handleResponse(resEdificios);
       const dataUsers = await handleResponse(resUsers);
 
-      // 1. Armar mapa de Edificios
+      // 1. Mapa de Edificios
       const mapEd = {};
       if (Array.isArray(dataEdificios)) {
         dataEdificios.forEach(e => {
@@ -91,37 +66,35 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
       }
       setEdificiosMap(mapEd);
 
-      // 2. Armar mapa de Departamentos
+      // 2. Mapa de Departamentos: Piso antes de Depto (Ej. "Gaviota - Piso 1 Depto H")
       const mapDep = {};
       if (Array.isArray(dataDeptos)) {
         dataDeptos.forEach(d => {
           const edNombre = mapEd[d.id_edificio] || 'Edificio';
           const num = d.numero_departamento || d.numero || 'S/N';
-          mapDep[d.id_departamento || d.id] = `${edNombre} - Depto ${num}`;
+          const piso = d.piso || 1;
+          mapDep[d.id_departamento || d.id] = `${edNombre} - Piso ${piso} Depto ${num}`;
         });
       }
       setDeptosMap(mapDep);
 
-      // 3. Armar mapa de Usuarios / Inquilinos
+      // 3. Mapa de Usuarios / Inquilinos
       const mapUsr = {};
       if (Array.isArray(dataUsers)) {
         dataUsers.forEach(u => {
-          const nombreComp = `${u.nombre || ''} ${u.primer_apellido || ''}`.trim();
+          const nombreComp = `${u.nombre || ''} ${u.primer_apellido || ''} ${u.segundo_apellido || ''}`.trim();
           const ci = u.ci_nit ? ` (CI: ${u.ci_nit})` : '';
           mapUsr[u.id_usuario || u.id] = `${nombreComp}${ci}`;
         });
       }
       setUsuariosMap(mapUsr);
 
-      // Setear lista de contratos
-      if (Array.isArray(dataContratos) && dataContratos.length > 0) {
+      if (Array.isArray(dataContratos)) {
         setContratos(dataContratos);
-      } else {
-        setContratos(CONTRATOS_INICIALES);
       }
     } catch (error) {
       console.warn('Error al cargar la lista de contratos desde la API:', error.message);
-      setContratos(CONTRATOS_INICIALES);
+      toast.error('No se pudieron cargar los contratos');
     } finally {
       setLoading(false);
     }
@@ -131,7 +104,6 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
     if (!window.confirm('¿Estás seguro de eliminar o cancelar este contrato?')) return;
 
     const toastId = toast.loading('Eliminando contrato...');
-
     try {
       const response = await fetch(`${BASE_URL}/contratos/${id}`, {
         method: 'DELETE',
@@ -143,51 +115,36 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
       toast.success('Contrato eliminado exitosamente', { id: toastId });
       setContratos(prev => prev.filter(c => (c.id_contrato || c.id) !== id));
     } catch (error) {
-      toast.success('Contrato eliminado localmente', { id: toastId });
-      setContratos(prev => prev.filter(c => (c.id_contrato || c.id) !== id));
+      toast.error(error.message || 'Error al eliminar contrato', { id: toastId });
     }
   };
 
-  // Helper para formatear fechas ISO a YYYY-MM-DD
-  const formatFecha = (strFecha) => {
-    if (!strFecha) return 'N/A';
-    try {
-      return strFecha.split('T')[0];
-    } catch (e) {
-      return strFecha;
-    }
-  };
-
-  // Filtrado dinámico por nombre de departamento o de inquilino
+  // Filtrado por unidad o inquilino
   const contratosFiltrados = contratos.filter((c) => {
     const term = busqueda.toLowerCase();
-    
-    const deptoNombre = deptosMap[c.id_departamento] 
-      || c.departamentoNombre 
-      || c.departamento 
-      || '';
-
-    const inquilinoNombre = usuariosMap[c.id_usuario] 
-      || c.inquilinoNombre 
-      || c.inquilino 
-      || '';
+    const deptoNombre = deptosMap[c.id_departamento] || c.departamentoNombre || '';
+    const inquilinoNombre = usuariosMap[c.id_usuario] || c.inquilinoNombre || '';
 
     return deptoNombre.toLowerCase().includes(term) || inquilinoNombre.toLowerCase().includes(term);
   });
 
-  // Estilos visuales para el estado del contrato
   const getEstadoEstilos = (estado) => {
     const est = (estado || '').toUpperCase();
     switch (est) {
+      case 'DIRECTO':
       case 'ACTIVO':
       case 'VIGENTE':
-        return 'bg-emerald-50 text-emerald-600 border-emerald-200';
+        return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+      case 'TERCEROS':
+        return 'bg-purple-50 text-purple-700 border-purple-200';
+      case 'RENOVACION':
+        return 'bg-blue-50 text-blue-700 border-blue-200';
       case 'POR_VENCER':
-        return 'bg-amber-50 text-amber-600 border-amber-200';
+        return 'bg-amber-50 text-amber-700 border-amber-200';
       case 'FINALIZADO':
-        return 'bg-slate-50 text-slate-600 border-slate-200';
+        return 'bg-slate-100 text-slate-700 border-slate-200';
       case 'CANCELADO':
-        return 'bg-red-50 text-red-600 border-red-200';
+        return 'bg-red-50 text-red-700 border-red-200';
       default:
         return 'bg-slate-50 text-slate-600 border-slate-200';
     }
@@ -196,11 +153,11 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 animate-fade-in">
       
-      {/* Cabecera de la sección */}
+      {/* Cabecera */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h2 className="text-xl font-extrabold text-slate-800">Listado de Contratos</h2>
-          <p className="text-sm text-slate-500">Administra los acuerdos de alquiler vigentes e históricos.</p>
+          <p className="text-sm text-slate-500">Administra los acuerdos vigentes ordenados por ubicación</p>
         </div>
 
         <button 
@@ -211,12 +168,12 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
         </button>
       </div>
 
-      {/* Barra de Búsqueda Interna */}
+      {/* Barra de Búsqueda */}
       <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 mb-6 max-w-md focus-within:border-blue-600 focus-within:bg-white transition-all">
         <Search size={18} className="text-slate-400 shrink-0" />
         <input 
           type="text" 
-          placeholder="Buscar por departamento o inquilino..." 
+          placeholder="Buscar por edificio, piso, depto o inquilino..." 
           value={busqueda}
           onChange={(e) => setBusqueda(e.target.value)}
           className="bg-transparent border-none outline-none ml-2 text-sm text-slate-800 w-full"
@@ -234,10 +191,10 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
           <table className="w-full text-left border-collapse min-w-[700px]">
             <thead>
               <tr className="border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                <th className="py-4 px-4">Unidad / Inquilino</th>
-                <th className="py-4 px-4">Vigencia</th>
-                <th className="py-4 px-4">Renta / Garantía</th>
-                <th className="py-4 px-4">Estado</th>
+                <th className="py-4 px-4">Piso y Departamento / Inquilino</th>
+                <th className="py-4 px-4">Vigencia (Día / Mes / Año)</th>
+                <th className="py-4 px-4">Canon Total / Garantía</th>
+                <th className="py-4 px-4">Tipo / Estado</th>
                 <th className="py-4 px-4 text-right">Acciones</th>
               </tr>
             </thead>
@@ -246,15 +203,12 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                 contratosFiltrados.map((contrato) => {
                   const id = contrato.id_contrato || contrato.id;
 
-                  // Resolución de Nombres
                   const nombreDepto = deptosMap[contrato.id_departamento] 
                     || contrato.departamentoNombre 
-                    || contrato.departamento 
                     || `Departamento #${contrato.id_departamento || 1}`;
 
                   const nombreInquilino = usuariosMap[contrato.id_usuario] 
                     || contrato.inquilinoNombre 
-                    || contrato.inquilino 
                     || `Inquilino #${contrato.id_usuario || 1}`;
 
                   const montoRenta = Number(contrato.monto_renta || 0);
@@ -280,11 +234,11 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                         </div>
                       </td>
 
-                      {/* Fechas de Vigencia */}
+                      {/* Fechas de Vigencia Formato DD/MM/YYYY */}
                       <td className="py-4 px-4 text-slate-600">
                         <div className="flex items-center gap-1 text-xs font-semibold bg-slate-100 w-fit px-2.5 py-1 rounded-md">
                           <Calendar size={13} className="text-slate-400 shrink-0" />
-                          {formatFecha(contrato.fecha_inicio)} al {formatFecha(contrato.fecha_fin)}
+                          {formatFechaDMY(contrato.fecha_inicio)} al {formatFechaDMY(contrato.fecha_fin)}
                         </div>
                       </td>
 
@@ -299,30 +253,22 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                         </div>
                       </td>
 
-                      {/* Estado */}
+                      {/* Estado / Tipo */}
                       <td className="py-4 px-4">
                         <span className={`px-2.5 py-1 text-xs font-bold border rounded-lg ${getEstadoEstilos(contrato.estado)}`}>
-                          {contrato.estado || 'ACTIVO'}
+                          {contrato.estado || 'DIRECTO'}
                         </span>
                       </td>
 
                       {/* Acciones */}
                       <td className="py-4 px-4 text-right">
                         <div className="flex items-center justify-end gap-2">
-                          {/* Imprimir / Ver Documento Legal */}
                           <button 
                             onClick={() => onVerDocumentoClick && onVerDocumentoClick(contrato)}
-                            title="Ver / Imprimir Contrato Legal"
+                            title="Ver / Imprimir Contrato"
                             className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
                           >
                             <Printer size={17} />
-                          </button>
-
-                          <button 
-                            title="Editar"
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
-                          >
-                            <Edit2 size={17} />
                           </button>
 
                           <button 

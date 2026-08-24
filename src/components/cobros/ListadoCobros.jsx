@@ -2,14 +2,15 @@ import { useState, useEffect } from 'react';
 import { 
   Wallet, 
   Search, 
-  FileText, 
+  User, 
   Calendar, 
   DollarSign, 
   Tag,
   CheckCircle2,
   Loader2,
   X,
-  CreditCard
+  CreditCard,
+  Home
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
@@ -19,9 +20,23 @@ const MESES = [
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
 ];
 
+// Helper para formatear fechas a DD/MM/YYYY
+const formatFechaDMY = (strFecha) => {
+  if (!strFecha) return 'N/A';
+  try {
+    const soloFecha = strFecha.split('T')[0];
+    const [y, m, d] = soloFecha.split('-');
+    if (!y || !m || !d) return strFecha;
+    return `${d}/${m}/${y}`;
+  } catch (e) {
+    return strFecha;
+  }
+};
+
 export function ListadoCobros() {
   const [cobros, setCobros] = useState([]);
   const [conceptosMap, setConceptosMap] = useState({});
+  const [contratosInfoMap, setContratosInfoMap] = useState({});
   const [busqueda, setBusqueda] = useState('');
   const [loading, setLoading] = useState(true);
 
@@ -41,24 +56,73 @@ export function ListadoCobros() {
   const cargarDatos = async () => {
     setLoading(true);
     try {
-      const [resCobros, resConceptos] = await Promise.all([
+      const [resCobros, resConceptos, resContratos, resDeptos, resEdificios, resUsers] = await Promise.all([
         fetch(`${BASE_URL}/cobros`, { headers: getAuthHeaders() }),
         fetch(`${BASE_URL}/conceptos`, { headers: getAuthHeaders() }).catch(() => null),
+        fetch(`${BASE_URL}/contratos`, { headers: getAuthHeaders() }).catch(() => null),
+        fetch(`${BASE_URL}/departamentos`, { headers: getAuthHeaders() }).catch(() => null),
+        fetch(`${BASE_URL}/edificios`, { headers: getAuthHeaders() }).catch(() => null),
+        fetch(`${BASE_URL}/usuarios`, { headers: getAuthHeaders() }).catch(() => null),
       ]);
 
       const dataCobros = await handleResponse(resCobros);
+      const dataConc = resConceptos && resConceptos.ok ? await handleResponse(resConceptos) : [];
+      const dataContratos = resContratos && resContratos.ok ? await handleResponse(resContratos) : [];
+      const dataDeptos = resDeptos && resDeptos.ok ? await handleResponse(resDeptos) : [];
+      const dataEdificios = resEdificios && resEdificios.ok ? await handleResponse(resEdificios) : [];
+      const dataUsers = resUsers && resUsers.ok ? await handleResponse(resUsers) : [];
 
-      // Mapa de Conceptos
-      if (resConceptos && resConceptos.ok) {
-        const dataConc = await handleResponse(resConceptos);
-        if (Array.isArray(dataConc)) {
-          const mapC = {};
-          dataConc.forEach(c => {
-            mapC[c.id_concepto || c.id] = c.nombre;
-          });
-          setConceptosMap(mapC);
-        }
+      // 1. Mapa de Conceptos
+      const mapC = {};
+      if (Array.isArray(dataConc)) {
+        dataConc.forEach(c => {
+          mapC[c.id_concepto || c.id] = c.nombre;
+        });
       }
+      setConceptosMap(mapC);
+
+      // 2. Mapa de Edificios
+      const mapEd = {};
+      if (Array.isArray(dataEdificios)) {
+        dataEdificios.forEach(e => {
+          mapEd[e.id_edificio || e.id] = e.nombre;
+        });
+      }
+
+      // 3. Mapa de Departamentos
+      const mapDep = {};
+      if (Array.isArray(dataDeptos)) {
+        dataDeptos.forEach(d => {
+          const edNombre = mapEd[d.id_edificio] || 'Edificio';
+          const num = d.numero_departamento || d.numero || 'S/N';
+          const piso = d.piso || 1;
+          mapDep[d.id_departamento || d.id] = `${edNombre} - Piso ${piso} Depto ${num}`;
+        });
+      }
+
+      // 4. Mapa de Usuarios
+      const mapUsr = {};
+      if (Array.isArray(dataUsers)) {
+        dataUsers.forEach(u => {
+          const nombreComp = `${u.nombre || ''} ${u.primer_apellido || ''} ${u.segundo_apellido || ''}`.trim();
+          mapUsr[u.id_usuario || u.id] = nombreComp || 'Inquilino Registrado';
+        });
+      }
+
+      // 5. Mapa de Contratos (Inquilino + Depto)
+      const mapContratos = {};
+      if (Array.isArray(dataContratos)) {
+        dataContratos.forEach(con => {
+          const idContrato = con.id_contrato || con.id;
+          const inquilinoNombre = mapUsr[con.id_usuario] || 'Inquilino';
+          const deptoTexto = mapDep[con.id_departamento] || 'Unidad Residencial';
+          mapContratos[idContrato] = {
+            inquilino: inquilinoNombre,
+            ubicacion: deptoTexto,
+          };
+        });
+      }
+      setContratosInfoMap(mapContratos);
 
       if (Array.isArray(dataCobros)) {
         setCobros(dataCobros);
@@ -85,10 +149,10 @@ export function ListadoCobros() {
     if (!cobroSeleccionado) return;
 
     setSubmittingPago(true);
-    const toastId = toast.loading('Registrando el pago...');
+    const toastId = toast.loading('Registrando el cobro...');
 
     try {
-      const id = cobroSeleccionado.id_cobro;
+      const id = cobroSeleccionado.id_cobro || cobroSeleccionado.id;
       const response = await fetch(`${BASE_URL}/cobros/${id}/pagar`, {
         method: 'POST',
         headers: getAuthHeaders(),
@@ -100,9 +164,9 @@ export function ListadoCobros() {
       });
 
       await handleResponse(response);
-      toast.success('¡Pago registrado correctamente!', { id: toastId });
+      toast.success('¡Cobro registrado correctamente!', { id: toastId });
       setCobroSeleccionado(null);
-      cargarDatos(); // Recargar cobros con nuevo saldo y estado
+      cargarDatos();
     } catch (error) {
       toast.error(error.message || 'Error al procesar el pago', { id: toastId });
     } finally {
@@ -110,18 +174,20 @@ export function ListadoCobros() {
     }
   };
 
-  const formatFecha = (f) => {
-    if (!f) return 'N/A';
-    try { return f.split('T')[0]; } catch (e) { return f; }
-  };
-
   const cobrosFiltrados = cobros.filter(c => {
     const term = busqueda.toLowerCase();
+    const infoContrato = contratosInfoMap[c.id_contrato] || {};
+    const nombreInquilino = (infoContrato.inquilino || '').toLowerCase();
+    const ubicacion = (infoContrato.ubicacion || '').toLowerCase();
     const desc = (c.descripcion || '').toLowerCase();
     const conc = (conceptosMap[c.id_concepto] || '').toLowerCase();
-    const contratoId = String(c.id_contrato || '').toLowerCase();
 
-    return desc.includes(term) || conc.includes(term) || contratoId.includes(term);
+    return (
+      nombreInquilino.includes(term) ||
+      ubicacion.includes(term) ||
+      desc.includes(term) ||
+      conc.includes(term)
+    );
   });
 
   const getEstadoEstilos = (estado) => {
@@ -146,7 +212,7 @@ export function ListadoCobros() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h2 className="text-xl font-extrabold text-slate-800">Listado de Cobros y Expensas</h2>
-          <p className="text-sm text-slate-500">Administra las mensualidades autogeneradas y registra cobros.</p>
+          <p className="text-sm text-slate-500">Gestión de cuotas mensuales asociadas a inquilinos y unidades</p>
         </div>
       </div>
 
@@ -155,7 +221,7 @@ export function ListadoCobros() {
         <Search size={18} className="text-slate-400 shrink-0" />
         <input 
           type="text" 
-          placeholder="Buscar por concepto, descripción o contrato..." 
+          placeholder="Buscar por inquilino, piso o depto..." 
           value={busqueda}
           onChange={(e) => setBusqueda(e.target.value)}
           className="bg-transparent border-none outline-none ml-2 text-sm text-slate-800 w-full"
@@ -167,16 +233,16 @@ export function ListadoCobros() {
         {loading ? (
           <div className="flex flex-col items-center justify-center py-16 text-slate-400 gap-3">
             <Loader2 size={32} className="animate-spin text-blue-600" />
-            <span className="text-sm font-semibold">Cargando cuentas por cobrar...</span>
+            <span className="text-sm font-semibold">Cargando mensualidades...</span>
           </div>
         ) : (
           <table className="w-full text-left border-collapse min-w-[750px]">
             <thead>
               <tr className="border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                <th className="py-4 px-4">Concepto / Contrato</th>
-                <th className="py-4 px-4">Período</th>
+                <th className="py-4 px-4">Inquilino / Ubicación</th>
+                <th className="py-4 px-4">Concepto / Período</th>
                 <th className="py-4 px-4">Monto / Saldo</th>
-                <th className="py-4 px-4">Vencimiento</th>
+                <th className="py-4 px-4">Vencimiento (DD/MM/AAAA)</th>
                 <th className="py-4 px-4">Estado</th>
                 <th className="py-4 px-4 text-right">Acciones</th>
               </tr>
@@ -184,35 +250,46 @@ export function ListadoCobros() {
             <tbody className="divide-y divide-slate-100 text-sm">
               {cobrosFiltrados.length > 0 ? (
                 cobrosFiltrados.map((cobro) => {
-                  const id = cobro.id_cobro;
+                  const id = cobro.id_cobro || cobro.id;
+                  const infoContrato = contratosInfoMap[cobro.id_contrato] || {
+                    inquilino: 'Inquilino',
+                    ubicacion: `Contrato #${cobro.id_contrato}`,
+                  };
+
                   const nombreConcepto = conceptosMap[cobro.id_concepto] || cobro.descripcion || 'Cobro de Alquiler';
                   const monto = Number(cobro.monto || 0);
                   const saldo = cobro.saldo_pendiente !== undefined ? Number(cobro.saldo_pendiente) : monto;
 
                   return (
                     <tr key={id} className="hover:bg-slate-50/80 transition-colors">
+                      {/* Inquilino y Piso - Depto en lugar de solo Contrato #X */}
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-3">
                           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl shrink-0">
-                            <Wallet size={18} />
+                            <User size={18} />
                           </div>
                           <div>
-                            <p className="font-extrabold text-slate-800 text-sm flex items-center gap-1.5">
-                              <Tag size={13} className="text-slate-400 shrink-0" /> {nombreConcepto}
+                            <p className="font-extrabold text-slate-900 text-sm">
+                              {infoContrato.inquilino}
                             </p>
-                            <p className="text-xs text-slate-500 font-medium flex items-center gap-1.5 mt-0.5">
-                              <FileText size={13} className="text-slate-400 shrink-0" /> Contrato #{cobro.id_contrato}
+                            <p className="text-xs text-slate-500 font-medium flex items-center gap-1 mt-0.5">
+                              <Home size={13} className="text-slate-400 shrink-0" /> {infoContrato.ubicacion}
                             </p>
                           </div>
                         </div>
                       </td>
 
-                      <td className="py-4 px-4 text-slate-600">
-                        <span className="font-bold text-xs bg-slate-100 px-2.5 py-1 rounded-md text-slate-700">
+                      {/* Concepto y Período */}
+                      <td className="py-4 px-4">
+                        <div className="font-bold text-slate-800 text-xs">
+                          {nombreConcepto}
+                        </div>
+                        <span className="inline-block font-semibold text-[11px] bg-slate-100 px-2 py-0.5 rounded text-slate-600 mt-1">
                           {MESES[cobro.periodo_mes] || 'Mes'} {cobro.periodo_anio}
                         </span>
                       </td>
 
+                      {/* Monto / Saldo */}
                       <td className="py-4 px-4">
                         <div className="font-extrabold text-slate-800 flex items-center gap-1">
                           <DollarSign size={15} className="text-slate-400 shrink-0" />
@@ -225,19 +302,22 @@ export function ListadoCobros() {
                         )}
                       </td>
 
+                      {/* Fecha de Vencimiento DD/MM/YYYY */}
                       <td className="py-4 px-4 text-slate-600">
                         <div className="flex items-center gap-1 text-xs font-semibold">
                           <Calendar size={13} className="text-slate-400 shrink-0" />
-                          {formatFecha(cobro.fecha_vencimiento)}
+                          {formatFechaDMY(cobro.fecha_vencimiento)}
                         </div>
                       </td>
 
+                      {/* Estado */}
                       <td className="py-4 px-4">
                         <span className={`px-2.5 py-1 text-xs font-bold border rounded-lg ${getEstadoEstilos(cobro.estado)}`}>
                           {cobro.estado || 'PENDIENTE'}
                         </span>
                       </td>
 
+                      {/* Botón Cobrar */}
                       <td className="py-4 px-4 text-right">
                         {(cobro.estado || '').toUpperCase() !== 'PAGADO' ? (
                           <button 
@@ -258,7 +338,7 @@ export function ListadoCobros() {
               ) : (
                 <tr>
                   <td colSpan="6" className="text-center py-12 text-slate-400">
-                    No se encontraron cobros automáticos registrados.
+                    No se encontraron cobros registrados.
                   </td>
                 </tr>
               )}
@@ -267,14 +347,14 @@ export function ListadoCobros() {
         )}
       </div>
 
-      {/* MODAL DE REGISTRO DE PAGO */}
+      {/* Modal Registrar Cobro */}
       {cobroSeleccionado && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4">
           <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl animate-fade-in border border-slate-100">
             <div className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between">
               <div className="flex items-center gap-2">
                 <CreditCard size={20} className="text-emerald-400" />
-                <h3 className="font-extrabold text-base">Registrar Cobro de Alquiler</h3>
+                <h3 className="font-extrabold text-base">Registrar Cobro de Mensualidad</h3>
               </div>
               <button onClick={() => setCobroSeleccionado(null)} className="text-slate-400 hover:text-white">
                 <X size={18} />
@@ -283,7 +363,7 @@ export function ListadoCobros() {
 
             <form onSubmit={handleConfirmarPago} className="p-6 space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Monto a Cobrar ({cobroSeleccionado.moneda || 'BOB'})</label>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Monto ({cobroSeleccionado.moneda || 'BOB'})</label>
                 <input 
                   type="number" 
                   step="0.01" 
@@ -295,9 +375,9 @@ export function ListadoCobros() {
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Método de Pago</label>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">Método de Cobro</label>
                 <select 
-                  value={formPago.metodo_pago}
+                  value={formPago.metodo_pago} 
                   onChange={(e) => setFormPago({ ...formPago, metodo_pago: e.target.value })}
                   className="w-full py-3 px-4 border-2 border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-emerald-600 bg-white"
                 >
@@ -331,7 +411,7 @@ export function ListadoCobros() {
                   disabled={submittingPago}
                   className="px-6 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl shadow-lg shadow-emerald-600/20 text-sm disabled:opacity-50 flex items-center gap-2"
                 >
-                  {submittingPago ? 'Procesando...' : 'Confirmar Pago'}
+                  {submittingPago ? 'Procesando...' : 'Confirmar Cobro'}
                 </button>
               </div>
             </form>

@@ -9,6 +9,7 @@ import {
   Building2,
   Info,
   X,
+  Tag,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { BASE_URL, getAuthHeaders, handleResponse } from "../../api/config";
@@ -23,12 +24,12 @@ export function NuevoDepartamento({
 
   const [formData, setFormData] = useState({
     edificioId: "",
-    numero: "",
     piso: "",
+    numero: "",
+    tipoDepartamento: "DEPARTAMENTO", // Manejado en columna estado
     habitaciones: "1",
     banos: "1",
     precioMensual: "",
-    estado: "DISPONIBLE",
     observaciones: "",
   });
 
@@ -39,7 +40,7 @@ export function NuevoDepartamento({
     cargarEdificios();
   }, []);
 
-  // 2. Si venimos en modo edición, precargamos el formulario
+  // 2. Precarga en modo edición
   useEffect(() => {
     if (departamentoAEditar) {
       setFormData({
@@ -47,15 +48,15 @@ export function NuevoDepartamento({
           departamentoAEditar.id_edificio ||
           departamentoAEditar.edificioId ||
           "",
-        numero: departamentoAEditar.numero || "",
         piso: departamentoAEditar.piso || "",
+        numero: departamentoAEditar.numero || "",
+        tipoDepartamento: departamentoAEditar.estado || "DEPARTAMENTO",
         habitaciones: departamentoAEditar.habitaciones || "1",
         banos: departamentoAEditar.banos || "1",
         precioMensual:
           departamentoAEditar.precio_alquiler ||
           departamentoAEditar.precioMensual ||
           "",
-        estado: departamentoAEditar.estado || "DISPONIBLE",
         observaciones: departamentoAEditar.observaciones || "",
       });
     }
@@ -69,7 +70,6 @@ export function NuevoDepartamento({
       const data = await handleResponse(response);
       setEdificios(data || []);
 
-      // Si estamos creando y hay edificios, seleccionamos el primero por defecto
       if (Array.isArray(data) && data.length > 0 && !departamentoAEditar) {
         setFormData((prev) => ({
           ...prev,
@@ -104,15 +104,14 @@ export function NuevoDepartamento({
       : `${BASE_URL}/departamentos`;
     const method = isEdit ? "PATCH" : "POST";
 
-    // Nombres de propiedades exactos esperados por el DTO de NestJS
     const payload = {
       id_edificio: Number(formData.edificioId),
-      numero_departamento: String(formData.numero),
       piso: Number(formData.piso) || 1,
-      habitaciones: Number(formData.habitaciones), // <-- Cambiado (antes cant_habitaciones)
-      banos: Number(formData.banos), // <-- Cambiado (antes cant_banos)
-      precio_alquiler: Number(formData.precioMensual), // <-- Cambiado (antes monto_renta)
-      estado: formData.estado,
+      numero_departamento: String(formData.numero),
+      estado: formData.tipoDepartamento, // Almacena el tipo de departamento en estado
+      habitaciones: Number(formData.habitaciones),
+      banos: Number(formData.banos),
+      precio_alquiler: Number(formData.precioMensual),
       observaciones: formData.observaciones || null,
     };
 
@@ -151,11 +150,11 @@ export function NuevoDepartamento({
           <div>
             <h2 className="text-xl font-extrabold">
               {departamentoAEditar
-                ? "Editar Departamento"
-                : "Registrar Nuevo Departamento"}
+                ? "Editar Unidad / Departamento"
+                : "Registrar Nueva Unidad / Departamento"}
             </h2>
             <p className="text-sm text-slate-400">
-              Da de alta o modifica los datos de la unidad
+              Ingresa los datos de ubicación y tipo de inmueble
             </p>
           </div>
         </div>
@@ -173,7 +172,7 @@ export function NuevoDepartamento({
 
       {/* Cuerpo del Formulario */}
       <form onSubmit={handleSubmit} className="p-8 space-y-6">
-        {/* Selección del Edificio al que pertenece */}
+        {/* Selección del Edificio */}
         <div>
           <label className="block text-sm font-bold text-slate-700 mb-2">
             Edificio / Condominio
@@ -208,29 +207,8 @@ export function NuevoDepartamento({
           </div>
         </div>
 
-        {/* Fila: Número y Piso */}
+        {/* Fila: Piso PRIMERO y luego Número de Unidad */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">
-              Número de Unidad
-            </label>
-            <div className="relative flex items-center group">
-              <Hash
-                size={18}
-                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
-              />
-              <input
-                type="text"
-                name="numero"
-                required
-                placeholder="Ej. 4B, 101, PB-2"
-                value={formData.numero}
-                onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white"
-              />
-            </div>
-          </div>
-
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">
               Piso / Nivel
@@ -244,18 +222,87 @@ export function NuevoDepartamento({
                 type="number"
                 name="piso"
                 required
-                min="1"
-                placeholder="Ej. 4"
+                min="0"
+                placeholder="Ej. 1, 2, 3..."
                 value={formData.piso}
                 onChange={handleChange}
                 className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-bold"
               />
             </div>
           </div>
+
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-2">
+              Unidad / Departamento
+            </label>
+            <div className="relative flex items-center group">
+              <Hash
+                size={18}
+                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
+              />
+              <input
+                type="text"
+                name="numero"
+                required
+                placeholder="Ej. Depto H, 101, Cuarto 2"
+                value={formData.numero}
+                onChange={handleChange}
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white"
+              />
+            </div>
+          </div>
         </div>
 
-        {/* Fila: Habitaciones, Baños, Precio */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        {/* Fila: Tipo de Departamento y Precio */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-2">
+              Tipo de Inmueble
+            </label>
+            <div className="relative flex items-center group">
+              <Tag
+                size={18}
+                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none"
+              />
+              <select
+                name="tipoDepartamento"
+                value={formData.tipoDepartamento}
+                onChange={handleChange}
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-semibold appearance-none"
+              >
+                <option value="CUARTO">Cuarto</option>
+                <option value="MONOAMBIENTE">Monoambiente</option>
+                <option value="GARZONIER">Garzonier</option>
+                <option value="DEPARTAMENTO">Departamento</option>
+                <option value="GALERIA_TIENDA">Galería - Tienda</option>
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-2">
+              Precio Sugerido (Bs / Mes)
+            </label>
+            <div className="relative flex items-center group">
+              <DollarSign
+                size={18}
+                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
+              />
+              <input
+                type="number"
+                name="precioMensual"
+                required
+                placeholder="Ej. 1500"
+                value={formData.precioMensual}
+                onChange={handleChange}
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-extrabold text-blue-600"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Fila: Habitaciones y Baños */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">
               Habitaciones
@@ -298,65 +345,26 @@ export function NuevoDepartamento({
               />
             </div>
           </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">
-              Precio (Bs / Mes)
-            </label>
-            <div className="relative flex items-center group">
-              <DollarSign
-                size={18}
-                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
-              />
-              <input
-                type="number"
-                name="precioMensual"
-                required
-                placeholder="2500"
-                value={formData.precioMensual}
-                onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-extrabold text-blue-600"
-              />
-            </div>
-          </div>
         </div>
 
-        {/* Fila: Estado y Observaciones */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">
-              Estado Actual
-            </label>
-            <select
-              name="estado"
-              value={formData.estado}
+        {/* Observaciones */}
+        <div>
+          <label className="block text-sm font-bold text-slate-700 mb-2">
+            Observaciones (Opcional)
+          </label>
+          <div className="relative flex items-center group">
+            <Info
+              size={18}
+              className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
+            />
+            <input
+              type="text"
+              name="observaciones"
+              placeholder="Ej. Vista a la calle, incluye parqueo..."
+              value={formData.observaciones}
               onChange={handleChange}
-              className="w-full py-3.5 px-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-semibold"
-            >
-              <option value="DISPONIBLE">Disponible</option>
-              <option value="OCUPADO">Ocupado</option>
-              <option value="MANTENIMIENTO">En Mantenimiento</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">
-              Observaciones (Opcional)
-            </label>
-            <div className="relative flex items-center group">
-              <Info
-                size={18}
-                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
-              />
-              <input
-                type="text"
-                name="observaciones"
-                placeholder="Ej. Recién pintado, amoblado..."
-                value={formData.observaciones}
-                onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white"
-              />
-            </div>
+              className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white"
+            />
           </div>
         </div>
 
@@ -380,7 +388,7 @@ export function NuevoDepartamento({
               ? "Guardando..."
               : departamentoAEditar
                 ? "Guardar Cambios"
-                : "Registrar Departamento"}
+                : "Registrar Unidad"}
           </button>
         </div>
       </form>

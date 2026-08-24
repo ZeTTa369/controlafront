@@ -1,80 +1,89 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   FileText, 
   Home, 
-  Users, 
+  User, 
   Calendar, 
   DollarSign, 
-  Coins, 
   ShieldCheck, 
-  Activity,
-  Clock,
-  Download,
-  CheckSquare,
-  Square,
-  Eye,
-  BookOpen,
-  X,
-  Loader2
+  Download, 
+  CheckSquare, 
+  Square, 
+  Eye, 
+  X, 
+  Loader2, 
+  Search,
+  ListChecks
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import jsPDF from 'jspdf';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
 
-// Importamos la vista del documento legal si existe
-import { Contrato } from './Contrato';
-
-const CONCEPTOS_DEFAULT = [
-  { id_concepto: 1, nombre: 'Alquiler Mensual (Canon)', monto_sugerido: 1550.00 },
-  { id_concepto: 2, nombre: 'Expensas, Agua y Luz', monto_sugerido: 430.00 },
-  { id_concepto: 3, nombre: 'Mantenimiento de Ascensores', monto_sugerido: 50.00 }
-];
+// Asigna un peso para garantizar el orden de visualización
+const getPrioridadConcepto = (nombre = '') => {
+  const n = nombre.toUpperCase();
+  if (n.includes('ALQUILER') || n.includes('RENTA') || n.includes('CANON')) return 1;
+  if (n.includes('EXPENSA')) return 2;
+  if (n.includes('AGUA')) return 3;
+  if (n.includes('LUZ') || n.includes('ELECTRIC')) return 4;
+  return 5; // Conceptos adicionales
+};
 
 export function NuevoContrato({ onClose, onSave }) {
-  // Estados para catálogos desde la BD
   const [departamentosDisponibles, setDepartamentosDisponibles] = useState([]);
-  const [inquilinosRegistrados, setInquilinosRegistrados] = useState([]);
-  const [conceptosDisponibles, setConceptosDisponibles] = useState(CONCEPTOS_DEFAULT);
+  const [conceptosBD, setConceptosBD] = useState([]);
   const [loadingCatalogos, setLoadingCatalogos] = useState(true);
 
+  // Formulario General
   const [formData, setFormData] = useState({
     id_departamento: '',
-    id_usuario: '',
+    tipo_contrato: 'DIRECTO', // DIRECTO, TERCEROS, RENOVACION
+    beneficiario_tercero: '',
     fecha_inicio: '',
     fecha_fin: '',
     moneda: 'BOB',
     garantia: '1700',
     dia_limite_inicio: '17',
     dia_limite_fin: '20',
-    estado: 'ACTIVO'
   });
 
+  // Datos Inquilino
+  const [inquilinoData, setInquilinoData] = useState({
+    id_usuario: '',
+    nombre: '',
+    primer_apellido: '',
+    segundo_apellido: '',
+    ci_nit: '',
+    telefono: '',
+    email: '',
+  });
+
+  // Conceptos seleccionados dinámicamente { [id_concepto]: { seleccionado: boolean, monto: number } }
+  // Inician completamente desmarcados por defecto
   const [conceptosSeleccionados, setConceptosSeleccionados] = useState({});
+
   const [cobrosGenerados, setCobrosGenerados] = useState([]);
   const [mostrarVistaPrevia, setMostrarVistaPrevia] = useState(false);
-  const [mostrarModalDocumentoLegal, setMostrarModalDocumentoLegal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [buscandoCI, setBuscandoCI] = useState(false);
 
-  // Cargar datos reales desde NestJS al montar el componente
   useEffect(() => {
-    cargarCatalogosDesdeBD();
+    cargarCatalogos();
   }, []);
 
-  const cargarCatalogosDesdeBD = async () => {
+  const cargarCatalogos = async () => {
     setLoadingCatalogos(true);
     try {
-      const [resDeptos, resUsers, resEdificios, resConceptos] = await Promise.all([
+      const [resDeptos, resEdificios, resConceptos] = await Promise.all([
         fetch(`${BASE_URL}/departamentos`, { headers: getAuthHeaders() }),
-        fetch(`${BASE_URL}/usuarios`, { headers: getAuthHeaders() }),
         fetch(`${BASE_URL}/edificios`, { headers: getAuthHeaders() }),
-        fetch(`${BASE_URL}/conceptos`, { headers: getAuthHeaders() }).catch(() => null),
+        fetch(`${BASE_URL}/conceptos`, { headers: getAuthHeaders() }),
       ]);
 
       const dataDeptos = await handleResponse(resDeptos);
-      const dataUsers = await handleResponse(resUsers);
       const dataEdificios = await handleResponse(resEdificios);
+      const dataConceptos = await handleResponse(resConceptos);
 
-      // Mapa de Edificios
       const mapEdificios = {};
       if (Array.isArray(dataEdificios)) {
         dataEdificios.forEach(e => {
@@ -82,86 +91,71 @@ export function NuevoContrato({ onClose, onSave }) {
         });
       }
 
-      // Filtrar únicamente Departamentos DISPONIBLES
       if (Array.isArray(dataDeptos)) {
-        const deptosDisponiblesBD = dataDeptos
-          .filter(d => (d.estado || '').toUpperCase() === 'DISPONIBLE')
+        const deptosBD = dataDeptos
+          .filter(d => (d.estado || '').toUpperCase() !== 'OCUPADO')
+          .sort((a, b) => (a.piso || 1) - (b.piso || 1))
           .map(d => {
             const edNombre = mapEdificios[d.id_edificio] || 'Edificio';
             const num = d.numero_departamento || d.numero || 'S/N';
             return {
               id: d.id_departamento || d.id,
-              texto: `${edNombre} - Depto ${num} (Piso ${d.piso || 1})`,
-              precio_alquiler: d.precio_alquiler || 0
+              texto: `${edNombre} - Piso ${d.piso || 1} Depto ${num}`,
+              precio_alquiler: d.precio_alquiler || 1550
             };
           });
-        setDepartamentosDisponibles(deptosDisponiblesBD);
 
-        if (deptosDisponiblesBD.length > 0) {
-          setFormData(prev => ({ ...prev, id_departamento: deptosDisponiblesBD[0].id }));
+        setDepartamentosDisponibles(deptosBD);
+        if (deptosBD.length > 0) {
+          setFormData(prev => ({ ...prev, id_departamento: deptosBD[0].id }));
         }
       }
 
-      // Filtrar Inquilinos/Usuarios registrados en la BD
-      if (Array.isArray(dataUsers)) {
-        const usuariosBD = dataUsers.map(u => {
-          const nombreComp = `${u.nombre || ''} ${u.primer_apellido || ''} ${u.segundo_apellido || ''}`.trim();
-          const ci = u.ci_nit ? ` (CI: ${u.ci_nit})` : '';
-          return {
-            id: u.id_usuario || u.id,
-            nombre: `${nombreComp}${ci}`,
-            nombreRaw: nombreComp,
-            ciRaw: u.ci_nit || 'S/N'
-          };
+      if (Array.isArray(dataConceptos)) {
+        // Ordenamos los conceptos obtenidos según la jerarquía establecida
+        const ordenados = [...dataConceptos].sort((a, b) => {
+          const pA = getPrioridadConcepto(a.nombre);
+          const pB = getPrioridadConcepto(b.nombre);
+          if (pA !== pB) return pA - pB;
+          return a.nombre.localeCompare(b.nombre);
         });
-        setInquilinosRegistrados(usuariosBD);
 
-        if (usuariosBD.length > 0) {
-          setFormData(prev => ({ ...prev, id_usuario: usuariosBD[0].id }));
-        }
-      }
-
-      // Cargar conceptos si existe la API de conceptos
-      if (resConceptos && resConceptos.ok) {
-        const dataConceptos = await handleResponse(resConceptos);
-        if (Array.isArray(dataConceptos) && dataConceptos.length > 0) {
-          setConceptosDisponibles(dataConceptos.map(c => ({
-            id_concepto: c.id_concepto || c.id,
-            nombre: c.nombre,
-            monto_sugerido: Number(c.monto_sugerido || c.monto || 100)
-          })));
-        }
+        setConceptosBD(ordenados);
       }
     } catch (error) {
-      console.error('Error al cargar catálogos desde la BD:', error);
-      toast.error('Ocurrió un problema al cargar departamentos e inquilinos');
+      console.error('Error cargando catálogos:', error);
+      toast.error('Error al conectar con los catálogos del servidor');
     } finally {
       setLoadingCatalogos(false);
     }
   };
 
-  const handleChange = (e) => {
-    const { name, value } = e.target;
-    setFormData(prev => ({ ...prev, [name]: value }));
-  };
+  // Manejo de Checkbox de cada concepto
+  const handleConceptoToggle = (concepto) => {
+    const id = concepto.id_concepto || concepto.id;
+    const montoDefault = Number(concepto.monto_sugerido || concepto.monto || 0);
 
-  const handleConceptoToggle = (id_concepto, montoDefault) => {
     setConceptosSeleccionados(prev => {
-      const actual = prev[id_concepto];
-      if (actual?.seleccionado) {
+      const existe = prev[id]?.seleccionado;
+      if (existe) {
         const copy = { ...prev };
-        delete copy[id_concepto];
+        delete copy[id];
         return copy;
       } else {
         return {
           ...prev,
-          [id_concepto]: { seleccionado: true, monto: montoDefault }
+          [id]: {
+            seleccionado: true,
+            monto: montoDefault,
+            nombre: concepto.nombre,
+            prioridad: getPrioridadConcepto(concepto.nombre)
+          }
         };
       }
     });
   };
 
-  const handleMontoConceptoChange = (id_concepto, nuevoMonto) => {
+  const handleMontoChange = (id_concepto, nuevoMonto) => {
     setConceptosSeleccionados(prev => ({
       ...prev,
       [id_concepto]: {
@@ -171,261 +165,324 @@ export function NuevoContrato({ onClose, onSave }) {
     }));
   };
 
+  // Lista de conceptos activos ordenados por prioridad (Alquiler -> Expensas -> Agua -> Luz -> Extras)
+  const listaConceptosActivosOrdenados = useMemo(() => {
+    return Object.keys(conceptosSeleccionados)
+      .filter(id => conceptosSeleccionados[id]?.seleccionado)
+      .map(id => ({
+        id_concepto: Number(id),
+        ...conceptosSeleccionados[id]
+      }))
+      .sort((a, b) => {
+        if (a.prioridad !== b.prioridad) return a.prioridad - b.prioridad;
+        return a.nombre.localeCompare(b.nombre);
+      });
+  }, [conceptosSeleccionados]);
+
+  // Total recurrente mensual (Suma de los conceptos marcados, sin garantía)
+  const totalMensualRecurrente = useMemo(() => {
+    return listaConceptosActivosOrdenados.reduce((acc, c) => acc + (parseFloat(c.monto) || 0), 0);
+  }, [listaConceptosActivosOrdenados]);
+
+  const buscarInquilinoPorCI = async () => {
+    if (!inquilinoData.ci_nit.trim()) {
+      toast.error('Ingresa un CI/NIT para buscar');
+      return;
+    }
+
+    setBuscandoCI(true);
+    try {
+      const res = await fetch(`${BASE_URL}/usuarios`, { headers: getAuthHeaders() });
+      const usuarios = await handleResponse(res);
+      const encontrado = usuarios.find(u => String(u.ci_nit).trim() === inquilinoData.ci_nit.trim());
+
+      if (encontrado) {
+        setInquilinoData({
+          id_usuario: encontrado.id_usuario || encontrado.id,
+          nombre: encontrado.nombre || '',
+          primer_apellido: encontrado.primer_apellido || '',
+          segundo_apellido: encontrado.segundo_apellido || '',
+          ci_nit: encontrado.ci_nit || '',
+          telefono: encontrado.telefono || '',
+          email: encontrado.email || '',
+        });
+        toast.success(`Inquilino encontrado: ${encontrado.nombre} ${encontrado.primer_apellido}`);
+      } else {
+        toast('No existe registro con ese CI. Completa los datos para guardarlo.', { icon: 'ℹ️' });
+      }
+    } catch (error) {
+      toast.error('Error al consultar usuarios');
+    } finally {
+      setBuscandoCI(false);
+    }
+  };
+
+  const formatearFechaDMY = (fechaStr) => {
+    if (!fechaStr) return '';
+    const [y, m, d] = fechaStr.split('-');
+    return `${d}/${m}/${y}`;
+  };
+
   const calcularVistaPreviaCobros = () => {
     if (!formData.fecha_inicio || !formData.fecha_fin) {
-      toast.error('Por favor ingresa la fecha de inicio y fin del contrato primero.');
+      toast.error('Ingresa la fecha de inicio y fin del contrato.');
       return;
     }
 
-    const idsConceptosActivos = Object.keys(conceptosSeleccionados).filter(id => conceptosSeleccionados[id].seleccionado);
-    if (idsConceptosActivos.length === 0) {
-      toast.error('Selecciona al menos un concepto de cobro en la checklist.');
+    if (listaConceptosActivosOrdenados.length === 0) {
+      toast.error('Selecciona al menos un concepto en la checklist para calcular las cuotas.');
       return;
     }
 
-    const inicio = new Date(formData.fecha_inicio);
-    const fin = new Date(formData.fecha_fin);
+    const [yIni, mIni, dIni] = formData.fecha_inicio.split('-').map(Number);
+    const [yFin, mFin, dFin] = formData.fecha_fin.split('-').map(Number);
+
+    const inicio = new Date(yIni, mIni - 1, dIni);
+    const fin = new Date(yFin, mFin - 1, dFin);
 
     if (inicio >= fin) {
-      toast.error('La fecha de fin debe ser posterior a la fecha de inicio.');
+      toast.error('La fecha de finalización debe ser posterior a la de inicio.');
       return;
     }
 
-    let mesesDiferencia = (fin.getFullYear() - inicio.getFullYear()) * 12 + (fin.getMonth() - inicio.getMonth());
-    if (fin.getDate() >= inicio.getDate()) {
-      mesesDiferencia += 1;
-    }
+    let mesesDiferencia = (yFin - yIni) * 12 + (mFin - mIni);
+    if (dFin >= dIni) mesesDiferencia += 1;
     mesesDiferencia = Math.max(1, mesesDiferencia);
 
     const listaTemporal = [];
-    let fechaActual = new Date(inicio);
-
     for (let i = 0; i < mesesDiferencia; i++) {
-      const anio = fechaActual.getFullYear();
+      const fechaActual = new Date(yIni, mIni - 1 + i, 1);
       const mes = fechaActual.getMonth() + 1;
+      const anio = fechaActual.getFullYear();
 
-      idsConceptosActivos.forEach(idC => {
-        const conceptoInfo = conceptosDisponibles.find(c => c.id_concepto == idC);
-        const monto = conceptosSeleccionados[idC].monto;
-
-        listaTemporal.push({
-          periodo_mes: mes,
-          periodo_anio: anio,
-          id_concepto: idC,
-          nombre_concepto: conceptoInfo ? conceptoInfo.nombre : 'Concepto',
-          monto: monto,
-          fecha_emision: fechaActual.toISOString().split('T')[0]
-        });
+      listaConceptosActivosOrdenados.forEach(c => {
+        if (c.monto > 0) {
+          listaTemporal.push({
+            periodo_mes: mes,
+            periodo_anio: anio,
+            id_concepto: c.id_concepto,
+            nombre_concepto: c.nombre,
+            monto: c.monto,
+            fecha_emision: `${String(10).padStart(2, '0')}/${String(mes).padStart(2, '0')}/${anio}`
+          });
+        }
       });
-
-      fechaActual.setMonth(fechaActual.getMonth() + 1);
     }
 
     setCobrosGenerados(listaTemporal);
     setMostrarVistaPrevia(true);
-    toast.success(`Se generaron ${listaTemporal.length} cobros previstos para este contrato.`);
+    toast.success(`Se generaron ${listaTemporal.length} cuotas programadas.`);
   };
 
-  const generarPDFContrato = (datos) => {
+  const generarPDFContrato = () => {
     const doc = new jsPDF();
-    const departamentoTexto = departamentosDisponibles.find(d => String(d.id) === String(datos.id_departamento))?.texto || 'Unidad Residencial';
-    const inquilinoTexto = inquilinosRegistrados.find(u => String(u.id) === String(datos.id_usuario))?.nombre || 'Inquilino';
+    const deptoObj = departamentosDisponibles.find(d => String(d.id) === String(formData.id_departamento));
+    const nombreCompletoInquilino = `${inquilinoData.nombre} ${inquilinoData.primer_apellido} ${inquilinoData.segundo_apellido || ''}`.trim();
+    const fechaEmisionHoy = new Date().toLocaleDateString('es-ES');
 
     doc.setFont("helvetica", "bold");
-    doc.setFontSize(18);
-    doc.setTextColor(30, 41, 59);
-    doc.text("DOCUMENTO PRIVADO DE ALQUILER DE DEPARTAMENTO", 20, 20);
-
-    doc.setFontSize(10);
-    doc.setTextColor(100, 116, 139);
-    doc.text(`Fecha de Emisión: ${new Date().toLocaleDateString()}`, 20, 28);
-
-    doc.setDrawColor(226, 232, 240);
-    doc.line(20, 32, 190, 32);
-
-    doc.setFontSize(11);
-    doc.setTextColor(30, 41, 59);
-    doc.text("1. PARTES Y UBICACIÓN", 20, 42);
-
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(10);
-    doc.text(`Inmueble / Unidad: ${departamentoTexto}`, 25, 50);
-    doc.text(`Arrendataria: ${inquilinoTexto}`, 25, 57);
-    doc.text(`Estado del Contrato: ${datos.estado}`, 25, 64);
-
-    doc.setFont("helvetica", "bold");
-    doc.text("2. VIGENCIA Y PLAZO FATAL", 20, 78);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Inicio del Contrato: ${datos.fecha_inicio}`, 25, 85);
-    doc.text(`Conclusión de Contrato: ${datos.fecha_fin}`, 25, 92);
-    doc.text(`Período de pago mensual: Del ${datos.dia_limite_inicio} al ${datos.dia_limite_fin} de cada mes`, 25, 99);
-
-    doc.setFont("helvetica", "bold");
-    doc.text("3. CONDICIONES FINANCIERAS", 20, 112);
-    doc.setFont("helvetica", "normal");
-    doc.text(`Garantía de Alquiler: ${datos.garantia || 0} ${datos.moneda}`, 25, 119);
-    doc.text(`Total de cobros automáticos programados: ${cobrosGenerados.length} cuotas`, 25, 126);
-
-    doc.setDrawColor(150, 150, 150);
-    doc.line(25, 175, 85, 175);
-    doc.line(125, 175, 185, 175);
+    doc.setFontSize(16);
+    doc.setTextColor(15, 23, 42);
+    doc.text("DOCUMENTO PRIVADO DE CONTRATO DE ALQUILER", 105, 20, { align: "center" });
 
     doc.setFontSize(9);
-    doc.text("PROPIETARIO", 55, 182, { align: "center" });
-    doc.text("ARRENDATARIA", 155, 182, { align: "center" });
+    doc.setTextColor(100, 116, 139);
+    doc.text(`Fecha de Emisión: ${fechaEmisionHoy}`, 20, 28);
 
-    doc.save(`Contrato_Alquiler_${datos.id_departamento}.pdf`);
+    doc.setDrawColor(203, 213, 225);
+    doc.line(20, 32, 190, 32);
+
+    // 1. PARTES Y UBICACIÓN
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.setTextColor(15, 23, 42);
+    doc.text("1. PARTES Y UBICACIÓN DEL INMUEBLE", 20, 42);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    doc.text(`Inmueble: ${deptoObj?.texto || 'Ubicación Residencial'}`, 25, 50);
+    doc.text(`Inquilino / Arrendatario: ${nombreCompletoInquilino} (CI: ${inquilinoData.ci_nit})`, 25, 57);
+    doc.text(`Tipo de Contrato: ${formData.tipo_contrato}`, 25, 64);
+    
+    let yPos = 64;
+    if (formData.tipo_contrato === 'TERCEROS' && formData.beneficiario_tercero) {
+      yPos += 7;
+      doc.text(`Beneficiario / Ocupante Real: ${formData.beneficiario_tercero}`, 25, yPos);
+    }
+
+    // 2. VIGENCIA Y PLAZO
+    yPos += 12;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("2. VIGENCIA Y PLAZO", 20, yPos);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    yPos += 8;
+    doc.text(`Inicio de Vigencia: ${formatearFechaDMY(formData.fecha_inicio)}`, 25, yPos);
+    yPos += 7;
+    doc.text(`Fin de Vigencia: ${formatearFechaDMY(formData.fecha_fin)}`, 25, yPos);
+    yPos += 7;
+    doc.text(`Período Límite de Pago: Del ${formData.dia_limite_inicio} al ${formData.dia_limite_fin} de cada mes`, 25, yPos);
+
+    // 3. CONDICIONES FINANCIERAS (Orden estricto)
+    yPos += 12;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    doc.text("3. CONDICIONES FINANCIERAS", 20, yPos);
+
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    
+    // 1. Depósito de Garantía (Siempre encabeza las condiciones)
+    let numItem = 1;
+    yPos += 8;
+    doc.text(`${numItem}. Depósito de Garantía: ${Number(formData.garantia || 0).toFixed(2)} ${formData.moneda}`, 25, yPos);
+
+    // 2. Conceptos mensuales ordenados
+    listaConceptosActivosOrdenados.forEach(c => {
+      numItem += 1;
+      yPos += 7;
+      doc.text(`${numItem}. ${c.nombre}: ${Number(c.monto).toFixed(2)} ${formData.moneda}`, 25, yPos);
+    });
+
+    // Total Mensual Recurrente
+    yPos += 10;
+    doc.setFont("helvetica", "bold");
+    doc.setTextColor(30, 64, 175);
+    doc.text(
+      `TOTAL MENSUAL RECURRENTE (Sin Garantía): ${totalMensualRecurrente.toFixed(2)} ${formData.moneda}`, 
+      25, 
+      yPos
+    );
+
+    // Firmas
+    doc.setTextColor(15, 23, 42);
+    doc.setDrawColor(148, 163, 184);
+    doc.line(25, 240, 85, 240);
+    doc.line(125, 240, 185, 240);
+
+    doc.setFontSize(9);
+    doc.text("PROPIETARIO / ADMINISTRADOR", 55, 246, { align: "center" });
+    doc.text("ARRENDATARIO / INQUILINO", 155, 246, { align: "center" });
+
+    const fechaLimpia = formatearFechaDMY(formData.fecha_inicio).replace(/\//g, '-');
+    doc.save(`Contrato_${inquilinoData.primer_apellido || 'Inquilino'}_${fechaLimpia}.pdf`);
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!mostrarVistaPrevia || cobrosGenerados.length === 0) {
-      toast.error('Por favor genere y revise la vista previa de los cobros antes de guardar.');
+      toast.error('Genera y verifica la vista previa de cobros antes de guardar.');
       return;
     }
 
     setIsSubmitting(true);
-    const toastId = toast.loading('Guardando contrato en la base de datos...');
-
-    // Calcular el monto de la renta desde los conceptos seleccionados o usar valor por defecto
-    const idCanon = Object.keys(conceptosSeleccionados).find(id => conceptosSeleccionados[id].seleccionado);
-    const montoRentaCalculado = idCanon ? conceptosSeleccionados[idCanon].monto : 1550;
-
-    const payload = {
-      id_departamento: Number(formData.id_departamento),
-      id_usuario: Number(formData.id_usuario),
-      fecha_inicio: formData.fecha_inicio,
-      fecha_fin: formData.fecha_fin,
-      monto_renta: Number(montoRentaCalculado),
-      moneda: formData.moneda,
-      garantia: formData.garantia ? Number(formData.garantia) : 0,
-      conceptosIds: Object.keys(conceptosSeleccionados)
-        .filter(id => conceptosSeleccionados[id].seleccionado)
-        .map(id => Number(id)),
-    };
+    const toastId = toast.loading('Guardando contrato y registrando cuotas...');
 
     try {
-      const response = await fetch(`${BASE_URL}/contratos`, {
+      let idUsuarioFinal = inquilinoData.id_usuario;
+
+      // Registrar nuevo inquilino con contraseña válida si no existía previamente
+      if (!idUsuarioFinal) {
+        const passwordBase = String(inquilinoData.ci_nit).trim().length >= 6 
+          ? String(inquilinoData.ci_nit).trim() 
+          : '123456';
+
+        const resUser = await fetch(`${BASE_URL}/usuarios`, {
+          method: 'POST',
+          headers: getAuthHeaders(),
+          body: JSON.stringify({
+            nombre: inquilinoData.nombre.trim(),
+            primer_apellido: inquilinoData.primer_apellido.trim(),
+            segundo_apellido: inquilinoData.segundo_apellido?.trim() || null,
+            ci_nit: inquilinoData.ci_nit.trim(),
+            telefono: inquilinoData.telefono?.trim() || null,
+            email: inquilinoData.email?.trim() || `inquilino_${inquilinoData.ci_nit}@residencial.com`,
+            password: passwordBase,
+            rol: 3,
+            estado: 'ACTIVO',
+          }),
+        });
+
+        const nuevoUser = await handleResponse(resUser);
+        idUsuarioFinal = nuevoUser.id_usuario || nuevoUser.id;
+      }
+
+      const conceptosIds = listaConceptosActivosOrdenados.map(c => c.id_concepto);
+
+      const payloadContrato = {
+        id_departamento: Number(formData.id_departamento),
+        id_usuario: Number(idUsuarioFinal),
+        fecha_inicio: formData.fecha_inicio,
+        fecha_fin: formData.fecha_fin,
+        monto_renta: Number(totalMensualRecurrente),
+        moneda: formData.moneda,
+        garantia: parseFloat(formData.garantia) || 0,
+        estado: formData.tipo_contrato,
+        conceptosIds: conceptosIds,
+      };
+
+      const resContrato = await fetch(`${BASE_URL}/contratos`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify(payload),
+        body: JSON.stringify(payloadContrato),
       });
 
-      const data = await handleResponse(response);
+      const data = await handleResponse(resContrato);
 
-      generarPDFContrato(formData);
-      toast.success('¡Contrato registrado y cobros generados exitosamente!', { id: toastId });
+      generarPDFContrato();
+      toast.success('¡Contrato registrado y PDF descargado!', { id: toastId });
 
       if (onSave) onSave(data);
       if (onClose) onClose();
     } catch (error) {
-      toast.error(error.message || 'Error al guardar el contrato en el servidor', { id: toastId });
+      toast.error(error.message || 'Error al guardar el contrato', { id: toastId });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const inquilinoSeleccionadoObj = inquilinosRegistrados.find(u => String(u.id) === String(formData.id_usuario));
-
-  // Construcción del objeto simulado para el visor de contrato legal
-  const contratoObjetoParaVistaLegal = {
-    propietario: {
-      nombre: 'LUIS GABRIEL CLAROS ARISPE',
-      ci: '5613935 con QR',
-      nacionalidad: 'Boliviano',
-      inmuebleNombre: departamentosDisponibles.find(d => String(d.id) === String(formData.id_departamento))?.texto || 'EDIFICIO RESIDENCIAL',
-      ubicacion: 'Cochabamba, Bolivia',
-      matricula: '3.09.3.01.0005681 VIGENTE',
-      zona: 'Cruce Taquiña'
-    },
-    arrendataria: {
-      nombre: inquilinoSeleccionadoObj?.nombreRaw || 'INQUILINO REGISTRADO',
-      ci: inquilinoSeleccionadoObj?.ciRaw || 'S/N',
-      nacionalidad: 'Boliviana',
-      dependientes: 'Grupo familiar'
-    },
-    inmueble: {
-      departamento: 'A',
-      piso: 'Piso 1',
-      detalles: 'Dos dormitorios, baño privado, living comedor y cocina.',
-      llaves: 4
-    },
-    condiciones: {
-      canonMensual: 1550.00,
-      moneda: formData.moneda,
-      diaPagoInicio: formData.dia_limite_inicio || 17,
-      diaPagoFin: formData.dia_limite_fin || 20,
-      garantia: parseFloat(formData.garantia) || 1700.00,
-      fechaInicio: formData.fecha_inicio || '2026-03-01',
-      fechaFin: formData.fecha_fin || '2027-03-01',
-      duracion: '1 AÑO calendario',
-      luzPorPersona: 40.00,
-      aguaPorPersona: 40.00,
-      expensas: 150.00,
-      totalServiciosYExpensas: 430.00
-    },
-    fechaSuscripcion: new Date().toLocaleDateString()
-  };
-
   return (
     <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden max-w-4xl mx-auto animate-fade-in relative">
       
-      {/* Cabecera del Formulario */}
-      <div className="bg-slate-900 px-8 py-6 text-white flex flex-col md:flex-row md:items-center justify-between gap-4">
+      {/* Cabecera */}
+      <div className="bg-slate-900 px-8 py-6 text-white flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-blue-600 rounded-xl text-white">
             <FileText size={24} />
           </div>
           <div>
-            <h2 className="text-xl font-extrabold">Registrar Nuevo Contrato y Cobros Automáticos</h2>
-            <p className="text-sm text-slate-400">Define plazos, selecciona conceptos y previsualiza los cobros</p>
+            <h2 className="text-xl font-extrabold">Registrar Nuevo Contrato</h2>
+            <p className="text-sm text-slate-400">Selección dinámica de conceptos desde la base de datos</p>
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setMostrarModalDocumentoLegal(true)}
-          className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-blue-400 border border-slate-700 hover:border-blue-500 rounded-xl font-bold text-xs transition-all flex items-center justify-center gap-2"
-        >
-          <BookOpen size={16} /> Ver Contrato Legal Completo
-        </button>
+        {onClose && (
+          <button onClick={onClose} className="text-slate-400 hover:text-white p-2">
+            <X size={20} />
+          </button>
+        )}
       </div>
 
-      {/* MODAL PARA VER EL CONTRATO LEGAL COMPLETO */}
-      {mostrarModalDocumentoLegal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white rounded-2xl w-full max-w-5xl max-h-[90vh] overflow-y-auto p-6 relative shadow-2xl">
-            <button
-              onClick={() => setMostrarModalDocumentoLegal(false)}
-              className="absolute top-4 right-4 p-2 text-slate-400 hover:text-slate-800 bg-slate-100 rounded-full transition-colors"
-            >
-              <X size={20} />
-            </button>
-
-            <Contrato datosContrato={contratoObjetoParaVistaLegal} />
-          </div>
-        </div>
-      )}
-
-      {/* Cuerpo del Formulario */}
       <form onSubmit={handleSubmit} className="p-8 space-y-6">
-        
-        {/* Selección de Departamento e Inquilino (Desde la Base de Datos) */}
+
+        {/* 1. SELECCIÓN DE UNIDAD Y TIPO */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Departamento / Unidad (Disponible)</label>
-            <div className="relative flex items-center group">
-              <Home size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors z-10 pointer-events-none" />
+            <label className="block text-sm font-bold text-slate-700 mb-2">Piso y Departamento</label>
+            <div className="relative flex items-center">
+              <Home size={18} className="absolute left-4 text-slate-400 pointer-events-none" />
               <select
                 name="id_departamento"
                 required
                 value={formData.id_departamento}
-                onChange={handleChange}
+                onChange={(e) => setFormData({ ...formData, id_departamento: e.target.value })}
                 disabled={loadingCatalogos}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-white outline-none transition-all focus:border-blue-600 font-bold appearance-none cursor-pointer text-sm"
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl font-bold appearance-none text-sm outline-none focus:border-blue-600 bg-white"
               >
                 {loadingCatalogos ? (
-                  <option>Cargando departamentos disponibles...</option>
+                  <option>Cargando unidades...</option>
                 ) : departamentosDisponibles.length > 0 ? (
                   departamentosDisponibles.map(dep => (
                     <option key={dep.id} value={dep.id}>{dep.texto}</option>
@@ -438,170 +495,180 @@ export function NuevoContrato({ onClose, onSave }) {
           </div>
 
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Inquilino (Registrado en BD)</label>
-            <div className="relative flex items-center group">
-              <Users size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors z-10 pointer-events-none" />
-              <select
-                name="id_usuario"
+            <label className="block text-sm font-bold text-slate-700 mb-2">Tipo de Contrato</label>
+            <select
+              name="tipo_contrato"
+              value={formData.tipo_contrato}
+              onChange={(e) => setFormData({ ...formData, tipo_contrato: e.target.value })}
+              className="w-full py-3.5 px-4 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-blue-600 bg-white appearance-none"
+            >
+              <option value="DIRECTO">Contratante Directo</option>
+              <option value="TERCEROS">Contratante para Terceros</option>
+              <option value="RENOVACION">Renovación</option>
+            </select>
+          </div>
+        </div>
+
+        {/* Beneficiario Terceros */}
+        {formData.tipo_contrato === 'TERCEROS' && (
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl animate-fade-in">
+            <label className="block text-xs font-bold text-amber-900 mb-1">Nombre del Beneficiario / Ocupante Real</label>
+            <input
+              type="text"
+              name="beneficiario_tercero"
+              placeholder="Ej. Carlos Mendoza (Ocupante)"
+              value={formData.beneficiario_tercero}
+              onChange={(e) => setFormData({ ...formData, beneficiario_tercero: e.target.value })}
+              className="w-full py-2.5 px-3 border border-amber-300 rounded-lg text-sm font-semibold bg-white outline-none focus:border-amber-600"
+            />
+          </div>
+        )}
+
+        {/* 2. REGISTRO INQUILINO */}
+        <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50/60">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                <User size={18} className="text-blue-600" /> Datos del Inquilino / Arrendatario
+              </h3>
+              <p className="text-xs text-slate-500">Ingresa los datos personales; se asociará o creará automáticamente</p>
+            </div>
+            
+            <button
+              type="button"
+              onClick={buscarInquilinoPorCI}
+              disabled={buscandoCI}
+              className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl font-bold text-xs shadow-sm flex items-center gap-1.5 self-start"
+            >
+              <Search size={14} /> {buscandoCI ? 'Buscando...' : 'Autocompletar por CI'}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">CI / NIT *</label>
+              <input
+                type="text"
                 required
-                value={formData.id_usuario}
-                onChange={handleChange}
-                disabled={loadingCatalogos}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-white outline-none transition-all focus:border-blue-600 font-bold appearance-none cursor-pointer text-sm"
-              >
-                {loadingCatalogos ? (
-                  <option>Cargando inquilinos desde BD...</option>
-                ) : inquilinosRegistrados.length > 0 ? (
-                  inquilinosRegistrados.map(user => (
-                    <option key={user.id} value={user.id}>{user.nombre}</option>
-                  ))
-                ) : (
-                  <option value="" disabled>No hay usuarios registrados</option>
-                )}
-              </select>
+                placeholder="Ej. 6543210"
+                value={inquilinoData.ci_nit}
+                onChange={(e) => setInquilinoData({ ...inquilinoData, ci_nit: e.target.value })}
+                className="w-full py-2.5 px-3 border border-slate-300 rounded-xl text-sm font-bold bg-white outline-none focus:border-blue-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Nombre(s) *</label>
+              <input
+                type="text"
+                required
+                placeholder="Ej. Graciela"
+                value={inquilinoData.nombre}
+                onChange={(e) => setInquilinoData({ ...inquilinoData, nombre: e.target.value })}
+                className="w-full py-2.5 px-3 border border-slate-300 rounded-xl text-sm bg-white outline-none focus:border-blue-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Primer Apellido *</label>
+              <input
+                type="text"
+                required
+                placeholder="Ej. Montoya"
+                value={inquilinoData.primer_apellido}
+                onChange={(e) => setInquilinoData({ ...inquilinoData, primer_apellido: e.target.value })}
+                className="w-full py-2.5 px-3 border border-slate-300 rounded-xl text-sm bg-white outline-none focus:border-blue-600"
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Segundo Apellido</label>
+              <input
+                type="text"
+                placeholder="Opcional"
+                value={inquilinoData.segundo_apellido}
+                onChange={(e) => setInquilinoData({ ...inquilinoData, segundo_apellido: e.target.value })}
+                className="w-full py-2.5 px-3 border border-slate-300 rounded-xl text-sm bg-white outline-none focus:border-blue-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Teléfono / Celular</label>
+              <input
+                type="text"
+                placeholder="Ej. 70000000"
+                value={inquilinoData.telefono}
+                onChange={(e) => setInquilinoData({ ...inquilinoData, telefono: e.target.value })}
+                className="w-full py-2.5 px-3 border border-slate-300 rounded-xl text-sm bg-white outline-none focus:border-blue-600"
+              />
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Correo Electrónico</label>
+              <input
+                type="email"
+                placeholder="inquilino@email.com"
+                value={inquilinoData.email}
+                onChange={(e) => setInquilinoData({ ...inquilinoData, email: e.target.value })}
+                className="w-full py-2.5 px-3 border border-slate-300 rounded-xl text-sm bg-white outline-none focus:border-blue-600"
+              />
             </div>
           </div>
         </div>
 
-        {/* Vigencia del Contrato (Fechas) */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* 3. VIGENCIA */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">Fecha de Inicio</label>
-            <div className="relative flex items-center group">
-              <Calendar size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none" />
+            <div className="relative flex items-center">
+              <Calendar size={18} className="absolute left-4 text-slate-400 pointer-events-none" />
               <input
                 type="date"
-                name="fecha_inicio"
                 required
                 value={formData.fecha_inicio}
-                onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 font-medium text-sm"
+                onChange={(e) => setFormData({ ...formData, fecha_inicio: e.target.value })}
+                className="w-full py-3 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-white font-medium text-sm outline-none focus:border-blue-600"
               />
             </div>
           </div>
 
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">Fecha de Finalización</label>
-            <div className="relative flex items-center group">
-              <Calendar size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none" />
+            <div className="relative flex items-center">
+              <Calendar size={18} className="absolute left-4 text-slate-400 pointer-events-none" />
               <input
                 type="date"
-                name="fecha_fin"
                 required
                 value={formData.fecha_fin}
-                onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 font-medium text-sm"
+                onChange={(e) => setFormData({ ...formData, fecha_fin: e.target.value })}
+                className="w-full py-3 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-white font-medium text-sm outline-none focus:border-blue-600"
               />
             </div>
           </div>
         </div>
 
-        {/* Moneda y Garantía */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Depósito de Garantía</label>
-            <div className="relative flex items-center group">
-              <ShieldCheck size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none" />
-              <input
-                type="number"
-                step="0.01"
-                name="garantia"
-                required
-                placeholder="0.00"
-                value={formData.garantia}
-                onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 text-sm font-bold"
-              />
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Moneda</label>
-            <div className="relative flex items-center group">
-              <Coins size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors z-10 pointer-events-none" />
-              <select
-                name="moneda"
-                value={formData.moneda}
-                onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-white outline-none transition-all focus:border-blue-600 font-bold appearance-none cursor-pointer text-sm"
-              >
-                <option value="BOB">BOB (Bs)</option>
-                <option value="USD">USD ($)</option>
-                <option value="EUR">EUR (€)</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* Días Límite y Estado */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 bg-blue-50/50 border border-blue-100 rounded-xl">
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Rango de Días Límite de Pago</label>
-            <div className="flex items-center gap-2">
-              <div className="relative flex items-center w-full">
-                <Clock size={16} className="absolute left-3 text-slate-400 pointer-events-none" />
-                <input
-                  type="number"
-                  min="1"
-                  max="31"
-                  name="dia_limite_inicio"
-                  placeholder="17"
-                  required
-                  value={formData.dia_limite_inicio}
-                  onChange={handleChange}
-                  className="w-full py-3 pl-9 pr-2 border-2 border-slate-200 rounded-xl text-sm bg-white outline-none focus:border-blue-600 font-bold"
-                />
-              </div>
-              <span className="text-slate-500 font-bold">a</span>
-              <div className="relative flex items-center w-full">
-                <input
-                  type="number"
-                  min="1"
-                  max="31"
-                  name="dia_limite_fin"
-                  placeholder="20"
-                  required
-                  value={formData.dia_limite_fin}
-                  onChange={handleChange}
-                  className="w-full py-3 px-3 border-2 border-slate-200 rounded-xl text-sm bg-white outline-none focus:border-blue-600 font-bold"
-                />
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Estado del Contrato</label>
-            <div className="relative flex items-center group">
-              <Activity size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors z-10 pointer-events-none" />
-              <select
-                name="estado"
-                value={formData.estado}
-                onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-white outline-none transition-all focus:border-blue-600 font-bold appearance-none cursor-pointer text-sm"
-              >
-                <option value="ACTIVO">ACTIVO</option>
-                <option value="FINALIZADO">FINALIZADO</option>
-                <option value="CANCELADO">CANCELADO</option>
-              </select>
-            </div>
-          </div>
-        </div>
-
-        {/* SECCIÓN 1: CHECKLIST DE CONCEPTOS */}
+        {/* 4. CHECKLIST DINÁMICA DE CONCEPTOS DESDE BD (INICIAN DESMARCADOS) */}
         <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50/50">
-          <h3 className="text-base font-extrabold text-slate-800 mb-2">Conceptos Aplicables al Contrato</h3>
-          <p className="text-xs text-slate-500 mb-4">Selecciona los conceptos que se incluirán en este contrato y ajusta sus montos base si es necesario.</p>
-          
+          <h3 className="text-base font-extrabold text-slate-800 mb-1 flex items-center gap-2">
+            <ListChecks size={20} className="text-blue-600" /> Conceptos de Cobro (Base de Datos)
+          </h3>
+          <p className="text-xs text-slate-500 mb-4">
+            Marca los conceptos que aplican a este contrato y ajusta sus montos correspondientes:
+          </p>
+
           <div className="space-y-3">
-            {conceptosDisponibles.map(con => {
-              const estaSeleccionado = conceptosSeleccionados[con.id_concepto]?.seleccionado || false;
-              const montoActual = conceptosSeleccionados[con.id_concepto]?.monto ?? con.monto_sugerido;
+            {conceptosBD.map(con => {
+              const id = con.id_concepto || con.id;
+              const estaSeleccionado = conceptosSeleccionados[id]?.seleccionado || false;
+              const montoActual = conceptosSeleccionados[id]?.monto ?? Number(con.monto_sugerido || con.monto || 0);
 
               return (
-                <div key={con.id_concepto} className="flex items-center justify-between bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
+                <div key={id} className="flex items-center justify-between bg-white p-3.5 rounded-xl border border-slate-200 shadow-sm">
                   <button
                     type="button"
-                    onClick={() => handleConceptoToggle(con.id_concepto, con.monto_sugerido)}
+                    onClick={() => handleConceptoToggle(con)}
                     className="flex items-center gap-3 text-left focus:outline-none"
                   >
                     {estaSeleccionado ? (
@@ -616,13 +683,13 @@ export function NuevoContrato({ onClose, onSave }) {
 
                   {estaSeleccionado && (
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-bold text-slate-400">Monto Base:</span>
+                      <span className="text-xs font-bold text-slate-400">Monto ({formData.moneda}):</span>
                       <input
                         type="number"
                         step="0.01"
                         value={montoActual}
-                        onChange={(e) => handleMontoConceptoChange(con.id_concepto, e.target.value)}
-                        className="w-28 py-1.5 px-3 border border-slate-300 rounded-lg text-sm font-bold text-slate-800 focus:border-blue-600 outline-none"
+                        onChange={(e) => handleMontoChange(id, e.target.value)}
+                        className="w-28 py-1.5 px-3 border border-slate-300 rounded-lg text-sm font-extrabold text-blue-600 focus:border-blue-600 outline-none text-right"
                       />
                     </div>
                   )}
@@ -630,25 +697,72 @@ export function NuevoContrato({ onClose, onSave }) {
               );
             })}
           </div>
-
-          <div className="mt-4 flex justify-end">
-            <button
-              type="button"
-              onClick={calcularVistaPreviaCobros}
-              className="px-5 py-2.5 bg-slate-800 hover:bg-slate-900 text-white rounded-xl font-bold text-xs shadow transition-all flex items-center gap-2"
-            >
-              <Eye size={16} /> Generar Vista Previa de Cobros
-            </button>
-          </div>
         </div>
 
-        {/* SECCIÓN 2: TABLA DE VISTA PREVIA DE COBROS */}
+        {/* 5. DESGLOSE FINANCIERO DINÁMICO ORDENADO (SE ALIMENTA AL MARCAR CONCEPTOS) */}
+        <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50/40">
+          <h3 className="text-base font-extrabold text-slate-800 mb-1">Desglose de Condiciones Financieras</h3>
+          <p className="text-xs text-slate-500 mb-4">
+            Resumen visual ordenado (1. Garantía, 2. Alquiler, 3. Expensas, 4. Agua, 5. Luz, etc.):
+          </p>
+
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+            {/* 1. Depósito de Garantía (Fijo en cabecera del desglose) */}
+            <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
+              <label className="block text-xs font-bold text-slate-700 mb-1">1. Dep. Garantía</label>
+              <input
+                type="number"
+                step="0.01"
+                required
+                value={formData.garantia}
+                onChange={(e) => setFormData({ ...formData, garantia: e.target.value })}
+                className="w-full py-1.5 px-2 border border-slate-300 rounded-lg font-extrabold text-sm text-slate-800 bg-white outline-none focus:border-blue-600 text-right"
+              />
+            </div>
+
+            {/* Conceptos Marcados en Orden Jerárquico */}
+            {listaConceptosActivosOrdenados.map((c, index) => (
+              <div key={c.id_concepto} className="bg-white p-3 rounded-xl border border-blue-200 shadow-sm animate-fade-in">
+                <label className="block text-xs font-bold text-slate-700 mb-1 truncate" title={c.nombre}>
+                  {index + 2}. {c.nombre}
+                </label>
+                <div className="w-full py-1.5 px-2 bg-slate-50 border border-slate-200 rounded-lg font-extrabold text-sm text-blue-600 text-right">
+                  {Number(c.monto).toFixed(2)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {listaConceptosActivosOrdenados.length === 0 && (
+            <p className="text-xs text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-200 mt-3">
+              ⚠️ Aún no has marcado ningún concepto en la checklist superior. Marca al menos el Alquiler para ver el desglose.
+            </p>
+          )}
+        </div>
+
+        {/* RESUMEN TOTAL Y BOTÓN DE VISTA PREVIA */}
+        <div className="flex flex-col sm:flex-row items-center justify-between p-5 bg-blue-50 border border-blue-200 rounded-2xl gap-4">
+          <div>
+            <span className="text-xs font-bold uppercase text-blue-800 tracking-wider">Total Mensual Recurrente (Sin Garantía):</span>
+            <p className="text-2xl font-black text-blue-900">{totalMensualRecurrente.toFixed(2)} {formData.moneda} / mes</p>
+          </div>
+
+          <button
+            type="button"
+            onClick={calcularVistaPreviaCobros}
+            className="px-5 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow flex items-center gap-2"
+          >
+            <Eye size={16} /> Generar Vista Previa de Cobros
+          </button>
+        </div>
+
+        {/* 6. VISTA PREVIA DE CUOTAS */}
         {mostrarVistaPrevia && (
           <div className="border border-blue-200 bg-blue-50/30 rounded-2xl p-6 animate-fade-in">
-            <h3 className="text-base font-extrabold text-blue-900 mb-1">Vista Previa de Cobros Automáticos ({cobrosGenerados.length} en total)</h3>
-            <p className="text-xs text-slate-600 mb-4">Estos son los registros que se crearán automáticamente al guardar el contrato.</p>
+            <h3 className="text-base font-extrabold text-blue-900 mb-1">Vista Previa de Cuotas ({cobrosGenerados.length} en total)</h3>
+            <p className="text-xs text-slate-600 mb-4">Cobros programados automáticamente mes a mes:</p>
 
-            <div className="max-h-60 overflow-y-auto border border-blue-100 rounded-xl bg-white">
+            <div className="max-h-56 overflow-y-auto border border-blue-100 rounded-xl bg-white">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-blue-100/50 text-blue-900 font-bold border-b border-blue-100 uppercase">
@@ -691,11 +805,11 @@ export function NuevoContrato({ onClose, onSave }) {
           >
             {isSubmitting ? (
               <>
-                <Loader2 size={18} className="animate-spin" /> Guardando en BD...
+                <Loader2 size={18} className="animate-spin" /> Guardando...
               </>
             ) : (
               <>
-                <Download size={18} /> Confirmar, Guardar y Descargar PDF
+                <Download size={18} /> Confirmar y Descargar PDF
               </>
             )}
           </button>
