@@ -27,7 +27,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
     email: '',
     telefono: '',
     password: '',
-    rol: '3', // 1 = Admin, 2 = Conserje, 3 = Inquilino
+    rol: '2', // 1 = Propietario, 2 = Administrador, 3 = Conserje
     estado: 'ACTIVO'
   });
 
@@ -48,7 +48,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
         email: usuarioAEditar.email || '',
         telefono: usuarioAEditar.telefono || '',
         password: '',
-        rol: String(usuarioAEditar.rol || '3'),
+        rol: String(usuarioAEditar.rol || '2'),
         estado: usuarioAEditar.estado || 'ACTIVO'
       });
     }
@@ -63,10 +63,10 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
       setEdificios(Array.isArray(data) ? data : []);
       
       if (Array.isArray(data) && data.length > 0 && !usuarioAEditar) {
-        setFormData(prev => ({ ...prev, id_edificio: data[0].id_edificio }));
+        setFormData(prev => ({ ...prev, id_edificio: data[0].id_edificio || data[0].id }));
       }
     } catch (error) {
-      console.error('Error al cargar la lista de edificios:', error);
+      console.error('Error al cargar edificios:', error);
     } finally {
       setLoadingEdificios(false);
     }
@@ -89,18 +89,17 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
     const method = isEdit ? 'PATCH' : 'POST';
 
     const payload = {
-      nombre: formData.nombre,
-      primer_apellido: formData.primer_apellido,
-      segundo_apellido: formData.segundo_apellido || null,
-      ci_nit: formData.ci_nit,
-      email: formData.email,
-      telefono: formData.telefono || null,
+      nombre: formData.nombre.trim(),
+      primer_apellido: formData.primer_apellido.trim(),
+      segundo_apellido: formData.segundo_apellido?.trim() || null,
+      ci_nit: formData.ci_nit.trim(),
+      email: formData.email.trim().toLowerCase(),
+      telefono: formData.telefono?.trim() || null,
       rol: Number(formData.rol),
       estado: formData.estado,
       ...(formData.id_edificio && { id_edificio: Number(formData.id_edificio) }),
     };
 
-    // Solo se envía contraseña si es nuevo o si se ingresó en edición
     if (formData.password) {
       payload.password = formData.password;
     }
@@ -135,9 +134,9 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
           </div>
           <div>
             <h2 className="text-xl font-extrabold">
-              {usuarioAEditar ? 'Editar Usuario / Inquilino' : 'Registrar Nuevo Usuario / Inquilino'}
+              {usuarioAEditar ? 'Editar Cuenta de Usuario' : 'Registrar Nuevo Usuario'}
             </h2>
-            <p className="text-sm text-slate-400">Administra el personal e inquilinos del sistema</p>
+            <p className="text-sm text-slate-400">Asigna permisos y accesos según el rol de la persona</p>
           </div>
         </div>
 
@@ -155,7 +154,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
         <div>
           <label className="block text-sm font-bold text-slate-700 mb-2">Edificio Asignado</label>
           <div className="relative flex items-center group">
-            <Building2 size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors z-10 pointer-events-none" />
+            <Building2 size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none" />
             <select
               name="id_edificio"
               value={formData.id_edificio}
@@ -163,9 +162,9 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
               disabled={loadingEdificios}
               className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-white outline-none transition-all focus:border-blue-600 font-bold appearance-none cursor-pointer"
             >
-              <option value="">{loadingEdificios ? 'Cargando edificios...' : 'Seleccione un edificio...'}</option>
+              <option value="">{loadingEdificios ? 'Cargando edificios...' : 'Seleccione un edificio (Opcional)...'}</option>
               {edificios.map(e => (
-                <option key={e.id_edificio} value={e.id_edificio}>
+                <option key={e.id_edificio || e.id} value={e.id_edificio || e.id}>
                   {e.nombre} - {e.direccion}
                 </option>
               ))}
@@ -183,10 +182,10 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
               name="nombre"
               required
               maxLength={100}
-              placeholder="Ej. Carlos Roberto"
+              placeholder="Ej. Luis Gabriel"
               value={formData.nombre}
               onChange={handleChange}
-              className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white"
+              className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-medium"
             />
           </div>
         </div>
@@ -200,10 +199,10 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
               name="primer_apellido"
               required
               maxLength={100}
-              placeholder="Ej. Mendoza"
+              placeholder="Ej. Claros"
               value={formData.primer_apellido}
               onChange={handleChange}
-              className="w-full py-3.5 px-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white"
+              className="w-full py-3.5 px-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-medium"
             />
           </div>
 
@@ -213,15 +212,15 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
               type="text"
               name="segundo_apellido"
               maxLength={100}
-              placeholder="Ej. Vargas (Opcional)"
+              placeholder="Ej. Arispe (Opcional)"
               value={formData.segundo_apellido}
               onChange={handleChange}
-              className="w-full py-3.5 px-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white"
+              className="w-full py-3.5 px-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-medium"
             />
           </div>
         </div>
 
-        {/* Documento y Teléfono */}
+        {/* CI/NIT y Teléfono */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">C.I. / NIT</label>
@@ -232,7 +231,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
                 name="ci_nit"
                 required
                 maxLength={20}
-                placeholder="Ej. 12345678"
+                placeholder="Ej. 5613935"
                 value={formData.ci_nit}
                 onChange={handleChange}
                 className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-bold"
@@ -248,10 +247,10 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
                 type="text"
                 name="telefono"
                 maxLength={20}
-                placeholder="Ej. 71234567"
+                placeholder="Ej. 70000000"
                 value={formData.telefono}
                 onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white"
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-medium"
               />
             </div>
           </div>
@@ -259,7 +258,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
 
         {/* Correo Electrónico */}
         <div>
-          <label className="block text-sm font-bold text-slate-700 mb-2">Correo Electrónico</label>
+          <label className="block text-sm font-bold text-slate-700 mb-2">Correo Electrónico (Login)</label>
           <div className="relative flex items-center group">
             <Mail size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
             <input
@@ -267,10 +266,10 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
               name="email"
               required
               maxLength={150}
-              placeholder="correo@ejemplo.com"
+              placeholder="admin@residencial.com"
               value={formData.email}
               onChange={handleChange}
-              className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white"
+              className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-medium"
             />
           </div>
         </div>
@@ -278,18 +277,18 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
         {/* Rol y Estado */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 bg-blue-50/50 border border-blue-100 rounded-xl">
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Tipo de Usuario (Rol)</label>
+            <label className="block text-sm font-bold text-slate-700 mb-2">Rol del Sistema</label>
             <div className="relative flex items-center group">
-              <Shield size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors z-10 pointer-events-none" />
+              <Shield size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none" />
               <select
                 name="rol"
                 value={formData.rol}
                 onChange={handleChange}
                 className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-white outline-none transition-all focus:border-blue-600 font-bold appearance-none cursor-pointer"
               >
-                <option value="3">Inquilino</option>
-                <option value="1">Administrador</option>
-                <option value="2">Conserje</option>
+                <option value="1">Propietario (Acceso Total)</option>
+                <option value="2">Administrador (Todo excepto Estados de Cuenta)</option>
+                <option value="3">Conserje (Refacciones y Mantenimiento)</option>
               </select>
             </div>
           </div>
@@ -297,7 +296,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">Estado de la Cuenta</label>
             <div className="relative flex items-center group">
-              <Activity size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors z-10 pointer-events-none" />
+              <Activity size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none" />
               <select
                 name="estado"
                 value={formData.estado}
@@ -315,7 +314,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
         {/* Contraseña */}
         <div>
           <label className="block text-sm font-bold text-slate-700 mb-2">
-            {usuarioAEditar ? 'Contraseña (dejar en blanco para no cambiar)' : 'Contraseña de Acceso'}
+            {usuarioAEditar ? 'Contraseña (dejar en blanco para no modificar)' : 'Contraseña de Acceso'}
           </label>
           <div className="relative flex items-center group">
             <Lock size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors" />

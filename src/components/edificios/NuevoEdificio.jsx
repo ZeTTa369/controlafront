@@ -2,13 +2,11 @@ import { useState } from "react";
 import {
   Building2,
   MapPin,
-  DollarSign,
   Car,
   TreePine,
   X,
   Image as ImageIcon,
   Layers,
-  Import,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { BASE_URL, getAuthHeaders, handleResponse } from "../../api/config";
@@ -18,9 +16,8 @@ export function NuevoEdificio({ onClose, onSave }) {
     nombre: "",
     ciudad: "Cochabamba",
     direccion: "",
-    precioBase: "",
     categoria: "Lujo",
-    unidadesDisponibles: "",
+    totalPisos: "1",
     tieneParqueo: true,
     tieneAreasVerdes: true,
     imagen: "",
@@ -46,10 +43,10 @@ export function NuevoEdificio({ onClose, onSave }) {
         method: "POST",
         headers: getAuthHeaders(),
         body: JSON.stringify({
-          nombre: formData.nombre,
-          direccion: `${formData.direccion}, ${formData.ciudad}`,
-          total_pisos: Number(formData.unidadesDisponibles) || 1, // Se guarda en total_pisos
-          estado: "ACTIVO",
+          nombre: formData.nombre.trim(),
+          direccion: `${formData.direccion.trim()}, ${formData.ciudad}`,
+          total_pisos: Number(formData.totalPisos) || 1,
+          estado: formData.categoria, // Usamos estado para almacenar la categoría (Lujo, Familiar, etc.)
         }),
       });
 
@@ -110,7 +107,7 @@ export function NuevoEdificio({ onClose, onSave }) {
               type="text"
               name="nombre"
               required
-              placeholder="Ej. Torre Zafiro Platinum"
+              placeholder="Ej. Torre Gaviota"
               value={formData.nombre}
               onChange={handleChange}
               className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white text-sm font-medium"
@@ -160,30 +157,8 @@ export function NuevoEdificio({ onClose, onSave }) {
           </div>
         </div>
 
-        {/* Fila Precio Base, Categoría y Unidades */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <div>
-            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-              Precio Base (USD)
-            </label>
-            <div className="relative flex items-center group">
-              <DollarSign
-                size={18}
-                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
-              />
-              <input
-                type="number"
-                name="precioBase"
-                min="1"
-                required
-                placeholder="450"
-                value={formData.precioBase}
-                onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white text-sm font-bold"
-              />
-            </div>
-          </div>
-
+        {/* Fila: Categoría y Total de Pisos (Sin Precio Base) */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
               Categoría
@@ -197,7 +172,7 @@ export function NuevoEdificio({ onClose, onSave }) {
                 name="categoria"
                 value={formData.categoria}
                 onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white text-sm font-semibold"
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white text-sm font-semibold appearance-none"
               >
                 <option value="Lujo">Lujo</option>
                 <option value="Familiar">Familiar</option>
@@ -209,25 +184,25 @@ export function NuevoEdificio({ onClose, onSave }) {
 
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-              Unidades Disp.
+              Cantidad de Pisos
             </label>
             <input
               type="number"
-              name="unidadesDisponibles"
+              name="totalPisos"
               min="1"
               required
-              placeholder="12"
-              value={formData.unidadesDisponibles}
+              placeholder="Ej. 5"
+              value={formData.totalPisos}
               onChange={handleChange}
               className="w-full py-3.5 px-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white text-sm font-bold"
             />
           </div>
         </div>
 
-        {/* URL de la Imagen y Previsualización */}
+        {/* URL de la Portada */}
         <div>
           <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-            URL Imagen de Portada
+            URL Imagen de Portada (Opcional)
           </label>
           <div className="relative flex items-center group mb-2">
             <ImageIcon
