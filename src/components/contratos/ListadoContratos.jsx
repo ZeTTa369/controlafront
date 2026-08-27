@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { 
   FileText, 
   Search, 
-  Edit2, 
   Trash2, 
   Home, 
   Users, 
@@ -10,7 +9,13 @@ import {
   DollarSign, 
   Plus,
   Loader2,
-  Printer
+  Printer,
+  Eye,
+  X,
+  Building,
+  ShieldCheck,
+  CreditCard,
+  UserCheck
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
@@ -31,12 +36,19 @@ const formatFechaDMY = (strFecha) => {
 export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) {
   const [contratos, setContratos] = useState([]);
   const [busqueda, setBusqueda] = useState('');
+  const [filtroEdificio, setFiltroEdificio] = useState('');
   const [loading, setLoading] = useState(true);
 
   // Mapeos relacionales
   const [deptosMap, setDeptosMap] = useState({});
+  const [edificiosList, setEdificiosList] = useState([]);
   const [edificiosMap, setEdificiosMap] = useState({});
   const [usuariosMap, setUsuariosMap] = useState({});
+  const [usuariosRawMap, setUsuariosRawMap] = useState({});
+  const [deptosRawMap, setDeptosRawMap] = useState({});
+
+  // Modal de Detalle
+  const [contratoSeleccionado, setContratoSeleccionado] = useState(null);
 
   useEffect(() => {
     cargarTodo();
@@ -59,35 +71,47 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
 
       // 1. Mapa de Edificios
       const mapEd = {};
+      const listEd = [];
       if (Array.isArray(dataEdificios)) {
         dataEdificios.forEach(e => {
-          mapEd[e.id_edificio || e.id] = e.nombre;
+          const idEd = e.id_edificio || e.id;
+          mapEd[idEd] = e.nombre;
+          listEd.push({ id: idEd, nombre: e.nombre });
         });
       }
       setEdificiosMap(mapEd);
+      setEdificiosList(listEd);
 
-      // 2. Mapa de Departamentos: Piso antes de Depto (Ej. "Gaviota - Piso 1 Depto H")
+      // 2. Mapa de Departamentos
       const mapDep = {};
+      const rawDep = {};
       if (Array.isArray(dataDeptos)) {
         dataDeptos.forEach(d => {
+          const idDep = d.id_departamento || d.id;
           const edNombre = mapEd[d.id_edificio] || 'Edificio';
           const num = d.numero_departamento || d.numero || 'S/N';
           const piso = d.piso || 1;
-          mapDep[d.id_departamento || d.id] = `${edNombre} - Piso ${piso} Depto ${num}`;
+          mapDep[idDep] = `${edNombre} - Piso ${piso} Depto ${num}`;
+          rawDep[idDep] = { ...d, edNombre };
         });
       }
       setDeptosMap(mapDep);
+      setDeptosRawMap(rawDep);
 
       // 3. Mapa de Usuarios / Inquilinos
       const mapUsr = {};
+      const rawUsr = {};
       if (Array.isArray(dataUsers)) {
         dataUsers.forEach(u => {
+          const idUsr = u.id_usuario || u.id;
           const nombreComp = `${u.nombre || ''} ${u.primer_apellido || ''} ${u.segundo_apellido || ''}`.trim();
           const ci = u.ci_nit ? ` (CI: ${u.ci_nit})` : '';
-          mapUsr[u.id_usuario || u.id] = `${nombreComp}${ci}`;
+          mapUsr[idUsr] = `${nombreComp}${ci}`;
+          rawUsr[idUsr] = u;
         });
       }
       setUsuariosMap(mapUsr);
+      setUsuariosRawMap(rawUsr);
 
       if (Array.isArray(dataContratos)) {
         setContratos(dataContratos);
@@ -114,19 +138,37 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
 
       toast.success('Contrato eliminado exitosamente', { id: toastId });
       setContratos(prev => prev.filter(c => (c.id_contrato || c.id) !== id));
+      if (contratoSeleccionado && (contratoSeleccionado.id_contrato || contratoSeleccionado.id) === id) {
+        setContratoSeleccionado(null);
+      }
     } catch (error) {
       toast.error(error.message || 'Error al eliminar contrato', { id: toastId });
     }
   };
 
-  // Filtrado por unidad o inquilino
-  const contratosFiltrados = contratos.filter((c) => {
-    const term = busqueda.toLowerCase();
-    const deptoNombre = deptosMap[c.id_departamento] || c.departamentoNombre || '';
-    const inquilinoNombre = usuariosMap[c.id_usuario] || c.inquilinoNombre || '';
+  // Filtrado compuesto por Edificio y Buscador general
+  const contratosFiltrados = useMemo(() => {
+    return contratos.filter((c) => {
+      const term = busqueda.toLowerCase().trim();
+      const deptoNombre = deptosMap[c.id_departamento] || c.departamentoNombre || '';
+      const inquilinoNombre = usuariosMap[c.id_usuario] || c.inquilinoNombre || '';
+      const deptoObj = deptosRawMap[c.id_departamento];
 
-    return deptoNombre.toLowerCase().includes(term) || inquilinoNombre.toLowerCase().includes(term);
-  });
+      // Filtro por edificio
+      if (filtroEdificio && deptoObj) {
+        if (String(deptoObj.id_edificio) !== String(filtroEdificio)) {
+          return false;
+        }
+      }
+
+      if (!term) return true;
+
+      return (
+        deptoNombre.toLowerCase().includes(term) ||
+        inquilinoNombre.toLowerCase().includes(term)
+      );
+    });
+  }, [contratos, busqueda, filtroEdificio, deptosMap, usuariosMap, deptosRawMap]);
 
   const getEstadoEstilos = (estado) => {
     const est = (estado || '').toUpperCase();
@@ -151,13 +193,13 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 animate-fade-in">
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 animate-fade-in relative">
       
       {/* Cabecera */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h2 className="text-xl font-extrabold text-slate-800">Listado de Contratos</h2>
-          <p className="text-sm text-slate-500">Administra los acuerdos vigentes ordenados por ubicación</p>
+          <p className="text-sm text-slate-500">Administra los acuerdos vigentes, consulta detalles y descarga copias</p>
         </div>
 
         <button 
@@ -168,16 +210,39 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
         </button>
       </div>
 
-      {/* Barra de Búsqueda */}
-      <div className="flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 mb-6 max-w-md focus-within:border-blue-600 focus-within:bg-white transition-all">
-        <Search size={18} className="text-slate-400 shrink-0" />
-        <input 
-          type="text" 
-          placeholder="Buscar por edificio, piso, depto o inquilino..." 
-          value={busqueda}
-          onChange={(e) => setBusqueda(e.target.value)}
-          className="bg-transparent border-none outline-none ml-2 text-sm text-slate-800 w-full"
-        />
+      {/* Barra de Filtros (Buscador + Filtro Edificio) */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+        {/* Buscador de Inquilino / Depto */}
+        <div className="sm:col-span-2 flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition-all">
+          <Search size={18} className="text-slate-400 shrink-0" />
+          <input 
+            type="text" 
+            placeholder="Buscar por inquilino, CI, piso o número de depto..." 
+            value={busqueda}
+            onChange={(e) => setBusqueda(e.target.value)}
+            className="bg-transparent border-none outline-none ml-2 text-sm text-slate-800 w-full"
+          />
+          {busqueda && (
+            <button onClick={() => setBusqueda('')} className="text-slate-400 hover:text-slate-600">
+              <X size={16} />
+            </button>
+          )}
+        </div>
+
+        {/* Filtro por Edificio */}
+        <div className="relative flex items-center">
+          <Building size={18} className="absolute left-4 text-slate-400 pointer-events-none" />
+          <select
+            value={filtroEdificio}
+            onChange={(e) => setFiltroEdificio(e.target.value)}
+            className="w-full py-2.5 pl-11 pr-8 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold text-slate-700 outline-none focus:border-blue-600 focus:bg-white appearance-none cursor-pointer"
+          >
+            <option value="">Todos los Edificios</option>
+            {edificiosList.map(ed => (
+              <option key={ed.id} value={ed.id}>{ed.nombre}</option>
+            ))}
+          </select>
+        </div>
       </div>
 
       {/* Tabla de Contratos */}
@@ -191,7 +256,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
           <table className="w-full text-left border-collapse min-w-[700px]">
             <thead>
               <tr className="border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                <th className="py-4 px-4">Piso y Departamento / Inquilino</th>
+                <th className="py-4 px-4">Piso y Depto / Inquilino</th>
                 <th className="py-4 px-4">Vigencia (Día / Mes / Año)</th>
                 <th className="py-4 px-4">Canon Total / Garantía</th>
                 <th className="py-4 px-4">Tipo / Estado</th>
@@ -262,18 +327,29 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
 
                       {/* Acciones */}
                       <td className="py-4 px-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1">
+                          {/* BOTÓN 1: VER DETALLE COMPLETO */}
+                          <button 
+                            onClick={() => setContratoSeleccionado(contrato)}
+                            title="Ver Detalle del Contrato"
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                          >
+                            <Eye size={17} />
+                          </button>
+
+                          {/* BOTÓN 2: IMPRIMIR / PDF */}
                           <button 
                             onClick={() => onVerDocumentoClick && onVerDocumentoClick(contrato)}
-                            title="Ver / Imprimir Contrato"
+                            title="Ver Documento Legal"
                             className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
                           >
                             <Printer size={17} />
                           </button>
 
+                          {/* BOTÓN 3: ELIMINAR */}
                           <button 
                             onClick={() => handleDelete(id)}
-                            title="Eliminar"
+                            title="Eliminar Contrato"
                             className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
                           >
                             <Trash2 size={17} />
@@ -286,7 +362,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
               ) : (
                 <tr>
                   <td colSpan="5" className="text-center py-12 text-slate-400">
-                    No se encontraron contratos registrados.
+                    No se encontraron contratos con los filtros aplicados.
                   </td>
                 </tr>
               )}
@@ -294,6 +370,154 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
           </table>
         )}
       </div>
+
+      {/* ================= MODAL DE DETALLE COMPLETO DEL CONTRATO ================= */}
+      {contratoSeleccionado && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-2xl overflow-hidden animate-scale-up">
+            
+            {/* Cabecera del Modal */}
+            <div className="bg-slate-900 px-6 py-5 text-white flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-600 rounded-xl text-white">
+                  <FileText size={20} />
+                </div>
+                <div>
+                  <h3 className="text-lg font-extrabold">Detalle del Contrato de Alquiler</h3>
+                  <p className="text-xs text-slate-400">
+                    ID #{contratoSeleccionado.id_contrato || contratoSeleccionado.id} • Estado: {contratoSeleccionado.estado || 'DIRECTO'}
+                  </p>
+                </div>
+              </div>
+
+              <button 
+                onClick={() => setContratoSeleccionado(null)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Contenido del Detalle */}
+            <div className="p-6 space-y-5 max-h-[80vh] overflow-y-auto text-sm">
+              
+              {/* 1. Datos del Inquilino */}
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-2 flex items-center gap-1.5">
+                  <UserCheck size={15} className="text-blue-600" /> Información del Inquilino
+                </h4>
+                {(() => {
+                  const u = usuariosRawMap[contratoSeleccionado.id_usuario] || {};
+                  return (
+                    <div className="grid grid-cols-2 gap-2 text-xs">
+                      <div>
+                        <span className="text-slate-500">Nombre Completo:</span>
+                        <p className="font-extrabold text-slate-800 text-sm">
+                          {`${u.nombre || ''} ${u.primer_apellido || ''} ${u.segundo_apellido || ''}`.trim() || 'Inquilino Registrado'}
+                        </p>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Cédula de Identidad / NIT:</span>
+                        <p className="font-bold text-slate-800">{u.ci_nit || 'No registrado'}</p>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Teléfono / Celular:</span>
+                        <p className="font-semibold text-slate-800">{u.telefono || 'Sin teléfono'}</p>
+                      </div>
+                      <div>
+                        <span className="text-slate-500">Correo Electrónico:</span>
+                        <p className="font-semibold text-slate-800">{u.email || 'Sin correo'}</p>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* 2. Inmueble y Vigencia */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                    <Home size={15} className="text-blue-600" /> Ubicación
+                  </h4>
+                  <p className="font-bold text-slate-800">
+                    {deptosMap[contratoSeleccionado.id_departamento] || 'Departamento'}
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Tipo de Contrato: <strong className="text-slate-700">{contratoSeleccionado.estado || 'DIRECTO'}</strong>
+                  </p>
+                </div>
+
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1.5 flex items-center gap-1.5">
+                    <Calendar size={15} className="text-blue-600" /> Vigencia y Plazo
+                  </h4>
+                  <p className="font-bold text-slate-800 text-xs">
+                    Inicio: {formatFechaDMY(contratoSeleccionado.fecha_inicio)}
+                  </p>
+                  <p className="font-bold text-slate-800 text-xs">
+                    Finalización: {formatFechaDMY(contratoSeleccionado.fecha_fin)}
+                  </p>
+                </div>
+              </div>
+
+              {/* 3. Desglose de Condiciones Financieras (Orden Estricto) */}
+              <div className="border border-slate-200 rounded-xl p-4 bg-white">
+                <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
+                  <CreditCard size={15} className="text-blue-600" /> Condiciones Financieras y Servicios
+                </h4>
+                
+                <div className="space-y-2 text-xs">
+                  <div className="flex justify-between items-center py-1.5 border-b border-slate-100">
+                    <span className="font-semibold text-slate-700">1. Depósito de Garantía (Custodia):</span>
+                    <span className="font-extrabold text-slate-900">
+                      {Number(contratoSeleccionado.garantia || 0).toFixed(2)} {contratoSeleccionado.moneda || 'BOB'}
+                    </span>
+                  </div>
+
+                  <div className="flex justify-between items-center py-1.5 border-b border-slate-100">
+                    <span className="font-semibold text-slate-700">2. Alquiler / Renta Mensual (Canon):</span>
+                    <span className="font-extrabold text-blue-600">
+                      {Number(contratoSeleccionado.monto_renta || 0).toFixed(2)} {contratoSeleccionado.moneda || 'BOB'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Resumen Total Recurrente */}
+                <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-xl flex justify-between items-center">
+                  <span className="font-bold text-xs uppercase text-blue-900">Total Mensual Recurrente:</span>
+                  <span className="text-base font-black text-blue-900">
+                    {Number(contratoSeleccionado.monto_renta || 0).toFixed(2)} {contratoSeleccionado.moneda || 'BOB'} / mes
+                  </span>
+                </div>
+              </div>
+
+            </div>
+
+            {/* Pie del Modal */}
+            <div className="px-6 py-4 bg-slate-50 border-t border-slate-200 flex justify-between items-center">
+              <button
+                type="button"
+                onClick={() => setContratoSeleccionado(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors uppercase tracking-wider"
+              >
+                Cerrar
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (onVerDocumentoClick) onVerDocumentoClick(contratoSeleccionado);
+                  setContratoSeleccionado(null);
+                }}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow flex items-center gap-2"
+              >
+                <Printer size={15} /> Ver / Imprimir Documento Legal
+              </button>
+            </div>
+
+          </div>
+        </div>
+      )}
 
     </div>
   );
