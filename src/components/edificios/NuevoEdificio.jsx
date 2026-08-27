@@ -45,7 +45,7 @@ export function NuevoEdificio({ onClose, onSave }) {
         body: JSON.stringify({
           nombre: formData.nombre.trim(),
           direccion: `${formData.direccion.trim()}, ${formData.ciudad}`,
-          total_pisos: Number(formData.totalPisos) || 1,
+          total_departamentos: Number(formData.total_departamentos) || 1,
           estado: formData.categoria, // Usamos estado para almacenar la categoría (Lujo, Familiar, etc.)
         }),
       });
