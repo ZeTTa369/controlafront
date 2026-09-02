@@ -10,6 +10,9 @@ import {
   Info,
   X,
   Tag,
+  Compass,
+  Droplets,
+  Zap,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { BASE_URL, getAuthHeaders, handleResponse } from "../../api/config";
@@ -26,7 +29,10 @@ export function NuevoDepartamento({
     edificioId: "",
     piso: "",
     numero: "",
-    tipoDepartamento: "DEPARTAMENTO", // Manejado en columna estado
+    bloque: "FRONTAL",
+    medidor_agua: "INDEPENDIENTE",
+    medidor_luz: "INDEPENDIENTE",
+    tipoDepartamento: "DEPARTAMENTO",
     habitaciones: "1",
     banos: "1",
     precioMensual: "",
@@ -49,7 +55,13 @@ export function NuevoDepartamento({
           departamentoAEditar.edificioId ||
           "",
         piso: departamentoAEditar.piso || "",
-        numero: departamentoAEditar.numero || "",
+        numero:
+          departamentoAEditar.numero_departamento ||
+          departamentoAEditar.numero ||
+          "",
+        bloque: departamentoAEditar.bloque || "FRONTAL",
+        medidor_agua: departamentoAEditar.medidor_agua || "INDEPENDIENTE",
+        medidor_luz: departamentoAEditar.medidor_luz || "INDEPENDIENTE",
         tipoDepartamento: departamentoAEditar.estado || "DEPARTAMENTO",
         habitaciones: departamentoAEditar.habitaciones || "1",
         banos: departamentoAEditar.banos || "1",
@@ -108,7 +120,10 @@ export function NuevoDepartamento({
       id_edificio: Number(formData.edificioId),
       piso: Number(formData.piso) || 1,
       numero_departamento: String(formData.numero),
-      estado: formData.tipoDepartamento, // Almacena el tipo de departamento en estado
+      bloque: formData.bloque,
+      medidor_agua: formData.medidor_agua,
+      medidor_luz: formData.medidor_luz,
+      estado: formData.tipoDepartamento,
       habitaciones: Number(formData.habitaciones),
       banos: Number(formData.banos),
       precio_alquiler: Number(formData.precioMensual),
@@ -140,7 +155,7 @@ export function NuevoDepartamento({
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden max-w-2xl mx-auto relative">
+    <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden max-w-2xl mx-auto relative animate-fade-in">
       {/* Cabecera del Formulario */}
       <div className="bg-slate-900 px-8 py-6 text-white flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -154,7 +169,7 @@ export function NuevoDepartamento({
                 : "Registrar Nueva Unidad / Departamento"}
             </h2>
             <p className="text-sm text-slate-400">
-              Ingresa los datos de ubicación y tipo de inmueble
+              Ubicación, bloque, medidores y tipo de inmueble
             </p>
           </div>
         </div>
@@ -175,7 +190,7 @@ export function NuevoDepartamento({
         {/* Selección del Edificio */}
         <div>
           <label className="block text-sm font-bold text-slate-700 mb-2">
-            Edificio / Condominio
+            Edificio / Condominio *
           </label>
           <div className="relative flex items-center group">
             <Building2
@@ -207,23 +222,23 @@ export function NuevoDepartamento({
           </div>
         </div>
 
-        {/* Fila: Piso PRIMERO y luego Número de Unidad */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Fila: Piso, Número y Bloque */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">
-              Piso / Nivel
+              Piso / Nivel *
             </label>
             <div className="relative flex items-center group">
               <Layers
                 size={18}
-                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
+                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none"
               />
               <input
                 type="number"
                 name="piso"
                 required
                 min="0"
-                placeholder="Ej. 1, 2, 3..."
+                placeholder="Ej. 1, 2..."
                 value={formData.piso}
                 onChange={handleChange}
                 className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-bold"
@@ -233,27 +248,88 @@ export function NuevoDepartamento({
 
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">
-              Unidad / Departamento
+              Unidad / Depto *
             </label>
             <div className="relative flex items-center group">
               <Hash
                 size={18}
-                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
+                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none"
               />
               <input
                 type="text"
                 name="numero"
                 required
-                placeholder="Ej. Depto H, 101, Cuarto 2"
+                placeholder="Ej. 101, Depto A"
                 value={formData.numero}
                 onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white"
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-bold"
               />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-2">
+              Bloque *
+            </label>
+            <div className="relative flex items-center group">
+              <Compass
+                size={18}
+                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none"
+              />
+              <select
+                name="bloque"
+                value={formData.bloque}
+                onChange={handleChange}
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-bold appearance-none cursor-pointer text-sm"
+              >
+                <option value="FRONTAL">Bloque Frontal</option>
+                <option value="TRASERO">Bloque Trasero</option>
+              </select>
             </div>
           </div>
         </div>
 
-        {/* Fila: Tipo de Departamento y Precio */}
+        {/* Sección: Configuración de Medidores */}
+        <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl">
+          <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
+            Configuración de Servicios y Medidores
+          </label>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                <Droplets size={15} className="text-blue-500" /> Medidor de Agua
+              </label>
+              <select
+                name="medidor_agua"
+                value={formData.medidor_agua}
+                onChange={handleChange}
+                className="w-full py-2.5 px-3 border-2 border-slate-200 rounded-xl text-sm font-semibold bg-white outline-none focus:border-blue-600 cursor-pointer"
+              >
+                <option value="INDEPENDIENTE">Medidor Independiente</option>
+                <option value="COMPARTIDO">Medidor Compartido</option>
+                <option value="NO_TIENE">No tiene medidor</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
+                <Zap size={15} className="text-amber-500" /> Medidor de Luz
+              </label>
+              <select
+                name="medidor_luz"
+                value={formData.medidor_luz}
+                onChange={handleChange}
+                className="w-full py-2.5 px-3 border-2 border-slate-200 rounded-xl text-sm font-semibold bg-white outline-none focus:border-blue-600 cursor-pointer"
+              >
+                <option value="INDEPENDIENTE">Medidor Independiente</option>
+                <option value="COMPARTIDO">Medidor Compartido</option>
+                <option value="NO_TIENE">No tiene medidor</option>
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Fila: Tipo de Inmueble y Precio */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">
@@ -281,7 +357,7 @@ export function NuevoDepartamento({
 
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">
-              Precio Sugerido (Bs / Mes)
+              Precio Sugerido (Bs / Mes) *
             </label>
             <div className="relative flex items-center group">
               <DollarSign
@@ -290,6 +366,7 @@ export function NuevoDepartamento({
               />
               <input
                 type="number"
+                step="0.01"
                 name="precioMensual"
                 required
                 placeholder="Ej. 1500"
@@ -382,7 +459,7 @@ export function NuevoDepartamento({
           <button
             type="submit"
             disabled={isSubmitting}
-            className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-600/20 transition-all disabled:opacity-50"
+            className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-600/20 transition-all disabled:opacity-50 active:scale-95"
           >
             {isSubmitting
               ? "Guardando..."
