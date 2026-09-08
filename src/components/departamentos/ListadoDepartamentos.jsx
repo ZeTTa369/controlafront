@@ -13,15 +13,17 @@ import {
   Loader2,
   Droplets,
   Zap,
-  Info,
   Compass,
   Filter,
-  X
+  X,
+  Camera
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
+import { ModalEditarDepartamento } from '../Modals/ModalEditarDepartamento';
+import { obtenerFotosDepartamento } from '../../services/departamentoService';
 
-export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDepartamentoClick }) {
+export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
   const [departamentos, setDepartamentos] = useState([]);
   const [edificiosList, setEdificiosList] = useState([]);
   const [edificiosMap, setEdificiosMap] = useState({});
@@ -30,6 +32,11 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
   const [filtroEstado, setFiltroEstado] = useState('');
   const [loading, setLoading] = useState(true);
   const [actualizandoId, setActualizandoId] = useState(null);
+
+  // Estados de modales
+  const [deptoAEditar, setDeptoAEditar] = useState(null);
+  const [galeriaActiva, setGaleriaActiva] = useState(null); // { depto, fotos: [] }
+  const [cargandoGaleria, setCargandoGaleria] = useState(false);
 
   useEffect(() => {
     inicializarDatos();
@@ -69,7 +76,34 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
     }
   };
 
-  // Cambio rápido de estado en tiempo real (Disponible / Ocupado / Mantenimiento)
+  const handleEdicionExitosa = (deptoActualizado) => {
+    const idTarget = deptoActualizado.id_departamento || deptoActualizado.id;
+    setDepartamentos((prev) =>
+      prev.map((d) => {
+        const idActual = d.id_departamento || d.id;
+        return idActual === idTarget ? { ...d, ...deptoActualizado } : d;
+      })
+    );
+    setDeptoAEditar(null);
+  };
+
+  // Visor de fotos de Cloudinary
+  const handleVerGaleria = async (depto) => {
+    const idDepto = depto.id_departamento || depto.id;
+    setCargandoGaleria(true);
+    setGaleriaActiva({ depto, fotos: [] });
+
+    try {
+      const fotos = await obtenerFotosDepartamento(idDepto);
+      setGaleriaActiva({ depto, fotos: Array.isArray(fotos) ? fotos : [] });
+    } catch (error) {
+      toast.error('No se pudieron obtener las fotografías del departamento');
+      setGaleriaActiva(null);
+    } finally {
+      setCargandoGaleria(false);
+    }
+  };
+
   const handleCambiarEstado = async (id, nuevoEstado) => {
     setActualizandoId(id);
     const toastId = toast.loading('Actualizando estado...');
@@ -116,7 +150,6 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
     }
   };
 
-  // Filtrado compuesto
   const departamentosFiltrados = useMemo(() => {
     return departamentos.filter((depto) => {
       const term = busqueda.toLowerCase().trim();
@@ -127,12 +160,10 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
       const edificioNombre = (edificiosMap[edId] || '').toLowerCase();
       const obs = (depto.observaciones || '').toLowerCase();
 
-      // Filtro por Edificio
       if (filtroEdificio && String(depto.id_edificio) !== String(filtroEdificio)) {
         return false;
       }
 
-      // Filtro por Estado
       if (filtroEstado && (depto.estado || 'DISPONIBLE').toUpperCase() !== filtroEstado.toUpperCase()) {
         return false;
       }
@@ -177,18 +208,18 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 animate-fade-in">
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 animate-fade-in relative">
       
       {/* Cabecera */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h2 className="text-xl font-extrabold text-slate-800">Listado de Unidades / Departamentos</h2>
-          <p className="text-sm text-slate-500">Supervisa la disponibilidad, medidores y características de cada inmueble.</p>
+          <p className="text-sm text-slate-500">Supervisa la disponibilidad, medidores, galería y características de cada inmueble.</p>
         </div>
 
         <button 
           onClick={onNuevoDepartamentoClick}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2 active:scale-95"
+          className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2 active:scale-95 cursor-pointer"
         >
           <Home size={18} /> Registrar Unidad
         </button>
@@ -196,7 +227,6 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
 
       {/* Barra de Filtros */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
-        {/* Buscador */}
         <div className="sm:col-span-2 flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition-all">
           <Search size={18} className="text-slate-400 shrink-0" />
           <input 
@@ -207,13 +237,12 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
             className="bg-transparent border-none outline-none ml-2 text-sm text-slate-800 w-full"
           />
           {busqueda && (
-            <button onClick={() => setBusqueda('')} className="text-slate-400 hover:text-slate-600">
+            <button onClick={() => setBusqueda('')} className="text-slate-400 hover:text-slate-600 cursor-pointer">
               <X size={16} />
             </button>
           )}
         </div>
 
-        {/* Filtro Edificio */}
         <div className="relative flex items-center">
           <Building2 size={18} className="absolute left-4 text-slate-400 pointer-events-none" />
           <select
@@ -228,7 +257,6 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
           </select>
         </div>
 
-        {/* Filtro Estado */}
         <div className="relative flex items-center">
           <Filter size={18} className="absolute left-4 text-slate-400 pointer-events-none" />
           <select
@@ -260,7 +288,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
                 <th className="py-4 px-4">Tipo / Ambiente</th>
                 <th className="py-4 px-4">Medidores</th>
                 <th className="py-4 px-4">Estado / Disponibilidad</th>
-                <th className="py-4 px-4">Precio (Bs)</th>
+                <th className="py-4 px-4">Precio Sugerido</th>
                 <th className="py-4 px-4 text-right">Acciones</th>
               </tr>
             </thead>
@@ -276,22 +304,36 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
 
                   return (
                     <tr key={id} className="hover:bg-slate-50/80 transition-colors">
-                      {/* Unidad, Piso y Bloque */}
+                      {/* Unidad, Piso, Bloque y Botón de Galería */}
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-3">
                           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl shrink-0">
                             <Hash size={18} />
                           </div>
                           <div>
-                            <p className="font-extrabold text-slate-800 text-base">{numero}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="font-extrabold text-slate-800 text-base">{numero}</p>
+                              <button
+                                type="button"
+                                onClick={() => handleVerGaleria(depto)}
+                                title="Ver fotografías de la unidad"
+                                className="p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
+                              >
+                                <Camera size={14} />
+                              </button>
+                            </div>
                             <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium mt-0.5">
                               <span className="flex items-center gap-0.5">
                                 <Layers size={12} className="text-slate-400" /> Piso {depto.piso || 1}
                               </span>
-                              <span>•</span>
-                              <span className="flex items-center gap-0.5 text-blue-600 font-semibold">
-                                <Compass size={12} /> Bloque {bloque}
-                              </span>
+                              {bloque && (
+                                <>
+                                  <span>•</span>
+                                  <span className="flex items-center gap-0.5 text-blue-600 font-semibold">
+                                    <Compass size={12} /> Bloque {bloque}
+                                  </span>
+                                </>
+                              )}
                             </div>
                           </div>
                         </div>
@@ -329,7 +371,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
                         </div>
                       </td>
 
-                      {/* Switch Rápido de Estado / Disponibilidad */}
+                      {/* Switch Rápido de Estado con Nuevos Colores */}
                       <td className="py-4 px-4">
                         <select
                           disabled={actualizandoId === id}
@@ -339,8 +381,8 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
                             estadoActual === 'DISPONIBLE'
                               ? 'bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100'
                               : estadoActual === 'OCUPADO'
-                              ? 'bg-blue-50 text-blue-700 border-blue-300 hover:bg-blue-100'
-                              : 'bg-amber-50 text-amber-700 border-amber-300 hover:bg-amber-100'
+                              ? 'bg-red-50 text-red-700 border-red-300 hover:bg-red-100'
+                              : 'bg-yellow-50 text-yellow-700 border-yellow-300 hover:bg-yellow-100'
                           } disabled:opacity-50`}
                         >
                           <option value="DISPONIBLE">● DISPONIBLE</option>
@@ -349,10 +391,10 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
                         </select>
                       </td>
 
-                      {/* Precio */}
+                      {/* Precio (Bs en lugar de $) */}
                       <td className="py-4 px-4 font-extrabold text-slate-800">
-                        <div className="flex items-center gap-0.5 text-blue-600">
-                          <DollarSign size={15} className="text-blue-500 shrink-0" />
+                        <div className="flex items-center gap-1 text-blue-600">
+                          <span className="text-xs font-bold text-blue-500">Bs.</span>
                           {precio.toFixed(2)}
                         </div>
                       </td>
@@ -361,17 +403,19 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
                       <td className="py-4 px-4 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button 
-                            onClick={() => onEditarDepartamentoClick && onEditarDepartamentoClick(depto)}
-                            title="Editar"
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            type="button"
+                            onClick={() => setDeptoAEditar(depto)}
+                            title="Editar Departamento"
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
                           >
                             <Edit2 size={17} />
                           </button>
 
                           <button 
+                            type="button"
                             onClick={() => handleDelete(id, numero)}
-                            title="Eliminar"
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Eliminar Departamento"
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                           >
                             <Trash2 size={17} />
                           </button>
@@ -391,6 +435,82 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick, onEditarDeparta
           </table>
         )}
       </div>
+
+      {/* Modal de Edición de Departamento */}
+      {deptoAEditar && (
+        <ModalEditarDepartamento
+          departamento={deptoAEditar}
+          onClose={() => setDeptoAEditar(null)}
+          onSuccess={handleEdicionExitosa}
+        />
+      )}
+
+      {/* Modal de Visor de Galería Rápida */}
+      {galeriaActiva && (
+        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden w-full max-w-2xl flex flex-col animate-scale-up">
+            <div className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between">
+              <div>
+                <h3 className="font-bold text-base">
+                  Fotografías: Unidad {galeriaActiva.depto.numero_departamento || galeriaActiva.depto.numero}
+                </h3>
+                <p className="text-xs text-slate-400">
+                  {edificiosMap[galeriaActiva.depto.id_edificio] || 'Edificio'}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setGaleriaActiva(null)}
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div className="p-6 max-h-[70vh] overflow-y-auto">
+              {cargandoGaleria ? (
+                <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-2">
+                  <Loader2 size={24} className="animate-spin text-blue-600" />
+                  <span className="text-xs">Cargando fotografías...</span>
+                </div>
+              ) : galeriaActiva.fotos.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  {galeriaActiva.fotos.map((foto) => (
+                    <a
+                      key={foto.id_departamento_foto}
+                      href={foto.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="aspect-video sm:aspect-square rounded-xl overflow-hidden border border-slate-200 block group hover:shadow-md transition-all"
+                    >
+                      <img
+                        src={foto.url}
+                        alt="Departamento"
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform"
+                      />
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center py-12 text-slate-400">
+                  <p className="text-sm">Esta unidad aún no tiene fotos registradas.</p>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const depto = galeriaActiva.depto;
+                      setGaleriaActiva(null);
+                      setDeptoAEditar(depto);
+                    }}
+                    className="mt-3 text-xs font-bold text-blue-600 hover:underline cursor-pointer"
+                  >
+                    Subir fotos ahora en el editor
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

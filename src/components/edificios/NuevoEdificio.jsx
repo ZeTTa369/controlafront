@@ -1,9 +1,7 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useRef } from "react";
 import {
   Building2,
   MapPin,
-  Car,
-  TreePine,
   X,
   UploadCloud,
   Compass,
@@ -15,28 +13,21 @@ import {
 import toast from "react-hot-toast";
 import { BASE_URL, getAuthHeaders, handleResponse } from "../../api/config";
 
-const BOLIVIA_DATA = {
-  Cochabamba: ["Cercado", "Quillacollo", "Chapare", "Punata", "Esteban Arce", "Germán Jordán", "Arani", "Capinota", "Ayopaya", "Carrasco", "Mizque", "Campero", "Tapacarí", "Bolívar", "Arque", "Tiraque"],
-  "Santa Cruz": ["Andrés Ibáñez", "Warnes", "Sara", "Ichilo", "Chiquitos", "Guarayos", "Ñuflo de Chávez", "José Miguel de Velasco", "Ángel Sandoval", "Germán Busch", "Cordillera", "Vallegrande", "Florida", "Manuel María Caballero", "Obispo Santistevan"],
-  "La Paz": ["Murillo", "Pedro Domingo Murillo", "Los Andes", "Ingavi", "Omasuyos", "Aroma", "Caranavi", "Nor Yungas", "Sud Yungas", "Larecaja", "Inquisivi", "Pacajes", "Camacho", "Muñecas", "Franz Tamayo", "Manco Kapac", "Gualberto Villarroel", "General José Manuel Pando", "Iturralde", "Bautista Saavedra"],
-  Tarija: ["Cercado", "Gran Chaco", "Aniceto Arce", "José María Avilés", "Méndez", "Burnet O'Connor"],
-  Chuquisaca: ["Oropeza", "Jaime Zudáñez", "Tomina", "Hernando Siles", "Yamparáez", "Nor Cinti", "Sud Cinti", "Belisario Boeto", "Juana Azurduy de Padilla", "Luis Calvo"],
-  Oruro: ["Cercado", "Eduardo Avaroa", "Carangas", "Sajama", "Litoral", "Poopó", "Pantaleón Dalence", "Ladislao Cabrera", "Sabaya", "Saucarí", "Tomás Barrón", "Sur Carangas", "San Pedro de Totora", "Sebastián Pagador", "Mejillones", "Nor Carangas"],
-  Potosí: ["Tomás Frías", "Rafael Bustillo", "Cornelio Saavedra", "Chayanta", "Charcas", "Nor Chichas", "Sud Chichas", "Alonso de Ibáñez", "Antonio Quijarro", "Bernardino Bilbao", "Daniel Campos", "Enrique Baldivieso", "José María Linares", "Modesto Omiste", "Nor Lípez", "Sud Lípez"],
-  Beni: ["Cercado", "Vaca Díez", "José Ballivián", "Yacuma", "Moxos", "Marbán", "Mamoré", "Iténez"],
-  Pando: ["Nicolás Suárez", "Manuripi", "Madre de Dios", "Abuná", "Federico Román"],
-};
+// Provincias limitadas según requerimiento
+const PROVINCIAS_COCHABAMBA = ["Cochabamba", "Tiquipaya"];
 
 export function NuevoEdificio({ onClose, onSave }) {
   const [formData, setFormData] = useState({
     nombre: "",
     ciudad: "Cochabamba",
-    provincia: "Cercado",
+    provincia: "Cochabamba",
     direccion: "",
-    categoria: "Lujo",
+    categoria: "Vivienda Familiar",
     totalDepartamentos: "1",
-    tieneParqueo: true,
-    tieneAreasVerdes: true,
+    tieneParqueoMoto: false,
+    tieneAscensor: false,
+    tieneConserje: false,
+    tieneCamaras: false,
     imagen: "",
   });
 
@@ -44,23 +35,14 @@ export function NuevoEdificio({ onClose, onSave }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const fileInputRef = useRef(null);
 
-  const provinciasDisponibles = useMemo(() => {
-    return BOLIVIA_DATA[formData.ciudad] || [];
-  }, [formData.ciudad]);
-
   const handleChange = (e) => {
     const { name, value, type, checked } = e.target;
-    setFormData((prev) => {
-      const updated = { ...prev, [name]: type === "checkbox" ? checked : value };
-      if (name === "ciudad") {
-        const nuevasProvincias = BOLIVIA_DATA[value] || [];
-        updated.provincia = nuevasProvincias[0] || "";
-      }
-      return updated;
-    });
+    setFormData((prev) => ({
+      ...prev,
+      [name]: type === "checkbox" ? checked : value
+    }));
   };
 
-  // Manejador de subida de archivo a NestJS -> Cloudinary
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -78,7 +60,6 @@ export function NuevoEdificio({ onClose, onSave }) {
       data.append("file", file);
 
       const headers = getAuthHeaders();
-      // Eliminar Content-Type para que el navegador cree el multipart/form-data con el boundary correcto
       delete headers["Content-Type"];
 
       const res = await fetch(`${BASE_URL}/upload/imagen`, {
@@ -122,6 +103,10 @@ export function NuevoEdificio({ onClose, onSave }) {
         imagen: formData.imagen || null,
         total_departamentos: Number(formData.totalDepartamentos) || 1,
         estado: formData.categoria,
+        tiene_parqueo_moto: formData.tieneParqueoMoto,
+        tiene_ascensor: formData.tieneAscensor,
+        tiene_conserje: formData.tieneConserje,
+        tiene_camaras: formData.tieneCamaras,
       };
 
       const response = await fetch(`${BASE_URL}/edificios`, {
@@ -153,7 +138,7 @@ export function NuevoEdificio({ onClose, onSave }) {
           <div>
             <h2 className="text-xl font-extrabold">Registrar Nuevo Edificio</h2>
             <p className="text-xs text-slate-400">
-              Ubicación geográfica, capacidad, portada y datos del complejo
+              Ubicación geográfica, capacidad, portada y características
             </p>
           </div>
         </div>
@@ -162,7 +147,7 @@ export function NuevoEdificio({ onClose, onSave }) {
           <button
             type="button"
             onClick={onClose}
-            className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800 transition-colors"
+            className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
           >
             <X size={20} />
           </button>
@@ -204,24 +189,19 @@ export function NuevoEdificio({ onClose, onSave }) {
                 size={18}
                 className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none"
               />
-              <select
+              <input
+                type="text"
                 name="ciudad"
+                readOnly
                 value={formData.ciudad}
-                onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white text-sm font-semibold appearance-none cursor-pointer"
-              >
-                {Object.keys(BOLIVIA_DATA).map((depto) => (
-                  <option key={depto} value={depto}>
-                    {depto}
-                  </option>
-                ))}
-              </select>
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-100 outline-none text-sm font-semibold cursor-not-allowed"
+              />
             </div>
           </div>
 
           <div>
             <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
-              Provincia *
+              Provincia / Municipio *
             </label>
             <div className="relative flex items-center group">
               <Compass
@@ -234,7 +214,7 @@ export function NuevoEdificio({ onClose, onSave }) {
                 onChange={handleChange}
                 className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white text-sm font-semibold appearance-none cursor-pointer"
               >
-                {provinciasDisponibles.map((prov) => (
+                {PROVINCIAS_COCHABAMBA.map((prov) => (
                   <option key={prov} value={prov}>
                     {prov}
                   </option>
@@ -283,10 +263,8 @@ export function NuevoEdificio({ onClose, onSave }) {
                 onChange={handleChange}
                 className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white text-sm font-semibold appearance-none cursor-pointer"
               >
-                <option value="Lujo">Lujo</option>
-                <option value="Familiar">Familiar</option>
-                <option value="Estudio">Estudio</option>
-                <option value="Comercial">Comercial</option>
+                <option value="Vivienda Familiar">Vivienda Familiar</option>
+                <option value="Tienda Comercial">Tienda Comercial</option>
               </select>
             </div>
           </div>
@@ -308,7 +286,7 @@ export function NuevoEdificio({ onClose, onSave }) {
           </div>
         </div>
 
-        {/* Zona de Subida de Imagen a Cloudinary */}
+        {/* Subida de Portada */}
         <div>
           <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
             Foto de Portada del Edificio
@@ -364,7 +342,7 @@ export function NuevoEdificio({ onClose, onSave }) {
                 <button
                   type="button"
                   onClick={handleRemoveImage}
-                  className="bg-red-600/90 hover:bg-red-700 text-white p-1.5 rounded-lg shadow-md transition-all"
+                  className="bg-red-600/90 hover:bg-red-700 text-white p-1.5 rounded-lg shadow-md transition-all cursor-pointer"
                   title="Eliminar imagen"
                 >
                   <Trash2 size={15} />
@@ -374,33 +352,68 @@ export function NuevoEdificio({ onClose, onSave }) {
           )}
         </div>
 
-        {/* Amenidades */}
-        <div className="flex gap-8 pt-2">
-          <label className="flex items-center gap-3 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              name="tieneParqueo"
-              checked={formData.tieneParqueo}
-              onChange={handleChange}
-              className="w-5 h-5 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
-            />
-            <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5 uppercase tracking-wider">
-              <Car size={16} className="text-blue-600" /> Incluye Parqueo
-            </span>
+        {/* Amenidades y Características con Emojis */}
+        <div>
+          <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-3">
+            Características y Servicios
           </label>
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            {/* Parqueo para Moto */}
+            <label className="flex items-center gap-2.5 p-3 rounded-xl border-2 border-slate-200 bg-slate-50 hover:bg-blue-50/40 hover:border-blue-400 transition-all cursor-pointer select-none">
+              <input
+                type="checkbox"
+                name="tieneParqueoMoto"
+                checked={formData.tieneParqueoMoto}
+                onChange={handleChange}
+                className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+              />
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <span>🏍️</span> Parqueo Moto
+              </span>
+            </label>
 
-          <label className="flex items-center gap-3 cursor-pointer select-none">
-            <input
-              type="checkbox"
-              name="tieneAreasVerdes"
-              checked={formData.tieneAreasVerdes}
-              onChange={handleChange}
-              className="w-5 h-5 text-blue-600 rounded border-slate-300 focus:ring-blue-500"
-            />
-            <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5 uppercase tracking-wider">
-              <TreePine size={16} className="text-blue-600" /> Áreas Verdes
-            </span>
-          </label>
+            {/* Ascensor */}
+            <label className="flex items-center gap-2.5 p-3 rounded-xl border-2 border-slate-200 bg-slate-50 hover:bg-blue-50/40 hover:border-blue-400 transition-all cursor-pointer select-none">
+              <input
+                type="checkbox"
+                name="tieneAscensor"
+                checked={formData.tieneAscensor}
+                onChange={handleChange}
+                className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+              />
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <span>🛗</span> Ascensor
+              </span>
+            </label>
+
+            {/* Conserje */}
+            <label className="flex items-center gap-2.5 p-3 rounded-xl border-2 border-slate-200 bg-slate-50 hover:bg-blue-50/40 hover:border-blue-400 transition-all cursor-pointer select-none">
+              <input
+                type="checkbox"
+                name="tieneConserje"
+                checked={formData.tieneConserje}
+                onChange={handleChange}
+                className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+              />
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <span>👮</span> Conserje
+              </span>
+            </label>
+
+            {/* Cámaras de Seguridad */}
+            <label className="flex items-center gap-2.5 p-3 rounded-xl border-2 border-slate-200 bg-slate-50 hover:bg-blue-50/40 hover:border-blue-400 transition-all cursor-pointer select-none">
+              <input
+                type="checkbox"
+                name="tieneCamaras"
+                checked={formData.tieneCamaras}
+                onChange={handleChange}
+                className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
+              />
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <span>📹</span> Cámaras
+              </span>
+            </label>
+          </div>
         </div>
 
         {/* Botones de Acción */}
@@ -409,7 +422,7 @@ export function NuevoEdificio({ onClose, onSave }) {
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-3 rounded-xl font-bold text-xs text-slate-600 hover:bg-slate-100 transition-colors uppercase tracking-wider"
+              className="px-6 py-3 rounded-xl font-bold text-xs text-slate-600 hover:bg-slate-100 transition-colors uppercase tracking-wider cursor-pointer"
             >
               Cancelar
             </button>
@@ -417,7 +430,7 @@ export function NuevoEdificio({ onClose, onSave }) {
           <button
             type="submit"
             disabled={isSubmitting || uploadingImage}
-            className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-600/20 transition-all uppercase tracking-wider disabled:opacity-50 active:scale-95 flex items-center gap-2"
+            className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-600/20 transition-all uppercase tracking-wider disabled:opacity-50 active:scale-95 flex items-center gap-2 cursor-pointer"
           >
             {isSubmitting ? (
               <>
