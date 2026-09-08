@@ -51,7 +51,7 @@ export function ListadoCobros() {
   const [filtroEdificio, setFiltroEdificio] = useState('');
   const [tabEstado, setTabEstado] = useState('TODOS');
 
-  // Modal Principal: Contrato Activo (guardamos el ID para derivar todo en tiempo real)
+  // Modal Principal: Contrato Activo
   const [contratoActivoId, setContratoActivoId] = useState(null);
 
   // Submodal: Cobro Individual
@@ -95,9 +95,19 @@ export function ListadoCobros() {
       }
       setConceptosMap(mapC);
 
+      // Ahora guardamos el objeto completo del edificio (nombre, direccion, etc.)
       const mapEd = {};
       if (Array.isArray(dataEdificios)) {
-        dataEdificios.forEach(e => { mapEd[e.id_edificio || e.id] = e.nombre; });
+        dataEdificios.forEach(e => { 
+          const id = e.id_edificio || e.id;
+          mapEd[id] = {
+            id,
+            nombre: e.nombre || 'Edificio',
+            direccion: e.direccion || 'Dirección no especificada',
+            ciudad: e.ciudad || 'Cochabamba',
+            provincia: e.provincia || 'Cercado'
+          }; 
+        });
       }
       setEdificios(Array.isArray(dataEdificios) ? dataEdificios : []);
       setEdificiosMap(mapEd);
@@ -109,7 +119,7 @@ export function ListadoCobros() {
             id_edificio: d.id_edificio,
             numero: d.numero_departamento || d.numero || 'S/N',
             piso: d.piso || 1,
-            bloque: d.bloque || 'FRONTAL',
+            bloque: d.bloque || '',
             tipo: d.tipo_inmueble || 'Departamento',
           };
         });
@@ -143,7 +153,9 @@ export function ListadoCobros() {
       const idContrato = con.id_contrato || con.id;
       const depto = departamentosMap[con.id_departamento] || {};
       const idEdificio = depto.id_edificio || con.id_edificio;
-      const nombreEdificio = edificiosMap[idEdificio] || 'Edificio';
+      const edInfo = edificiosMap[idEdificio] || {};
+      const nombreEdificio = edInfo.nombre || 'Edificio';
+      const direccionEdificio = edInfo.direccion || con.direccion || '';
       const nombreInquilino = usuariosMap[con.id_usuario] || 'Inquilino';
 
       const cobrosContrato = cobros.filter(c => Number(c.id_contrato) === Number(idContrato));
@@ -186,9 +198,11 @@ export function ListadoCobros() {
         inquilino: nombreInquilino,
         idEdificio,
         edificio: nombreEdificio,
+        direccion_edificio: direccionEdificio,
         deptoNumero: depto.numero || 'S/N',
         deptoPiso: depto.piso || 1,
-        deptoBloque: depto.bloque || 'FRONTAL',
+        deptoBloque: depto.bloque || '',
+        personas: con.personas || con.cantidad_personas || con.cantidadPersonas || 1,
         montoAlquiler: Number(con.monto_alquiler || con.precio_alquiler || 0),
         moneda: con.moneda || 'BOB',
         totalDeuda,
@@ -206,7 +220,7 @@ export function ListadoCobros() {
     return tarjetasContratos.find(c => Number(c.idContrato) === Number(contratoActivoId)) || null;
   }, [contratoActivoId, tarjetasContratos]);
 
-  // Cobros del contrato activo agrupados por período mensual en tiempo real
+  // Cobros del contrato activo agrupados por período mensual
   const gruposMensualesContrato = useMemo(() => {
     if (!contratoActivoId) return [];
     const cobrosDelContrato = cobros.filter(c => Number(c.id_contrato) === Number(contratoActivoId));
@@ -223,6 +237,10 @@ export function ListadoCobros() {
           mes,
           anio,
           nombrePeriodo: `${MESES[mes] || 'Mes'} ${anio}`,
+          fechaPago: cobro.fecha_pago || cobro.updatedAt || cobro.fecha_vencimiento,
+          fechaInicio: cobro.fecha_inicio,
+          fechaFin: cobro.fecha_fin,
+          idRecibo: cobro.id_cobro || cobro.id,
           items: [],
           totalMonto: 0,
           totalSaldo: 0,
@@ -253,7 +271,6 @@ export function ListadoCobros() {
       }));
   }, [contratoActivoId, cobros]);
 
-  // Manejo de pago directo (actualiza cobros en 0 ms)
   const abrirFormPago = (cobro) => {
     const esPagado = (cobro.estado || '').toUpperCase() === 'PAGADO';
     const saldo = esPagado ? 0 : (cobro.saldo_pendiente ?? cobro.monto);
@@ -289,7 +306,6 @@ export function ListadoCobros() {
 
       const dataRespuesta = await handleResponse(response);
 
-      // Actualizar inmediatamente la fuente de verdad (cobros)
       setCobros(prevCobros => prevCobros.map(c => {
         if (Number(c.id_cobro || c.id) !== Number(idTarget)) return c;
 
@@ -502,8 +518,12 @@ export function ListadoCobros() {
                     <span className="truncate">{card.edificio}</span>
                     <span className="text-slate-300">•</span>
                     <span>Piso {card.deptoPiso}</span>
-                    <span className="text-slate-300">•</span>
-                    <span className="text-slate-400 font-semibold">Bloque {card.deptoBloque}</span>
+                    {card.deptoBloque && (
+                      <>
+                        <span className="text-slate-300">•</span>
+                        <span className="text-slate-400 font-semibold">Bloque {card.deptoBloque}</span>
+                      </>
+                    )}
                   </p>
                 </div>
 
@@ -550,7 +570,7 @@ export function ListadoCobros() {
         </div>
       )}
 
-      {/* ================= MODAL DETALLE DE COBROS (INTEGRADO DIRECTO) ================= */}
+      {/* ================= MODAL DETALLE DE COBROS ================= */}
       {contratoActivo && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-4xl overflow-hidden max-h-[90vh] flex flex-col animate-scale-up">
@@ -566,7 +586,7 @@ export function ListadoCobros() {
                     Cobranzas - {contratoActivo.inquilino}
                   </h3>
                   <p className="text-xs text-slate-400">
-                    {contratoActivo.edificio} • Piso {contratoActivo.deptoPiso} Depto {contratoActivo.deptoNumero} ({contratoActivo.deptoBloque})
+                    {contratoActivo.edificio} • Piso {contratoActivo.deptoPiso} Depto {contratoActivo.deptoNumero} {contratoActivo.deptoBloque ? `(${contratoActivo.deptoBloque})` : ''}
                   </p>
                 </div>
               </div>
@@ -742,7 +762,7 @@ export function ListadoCobros() {
         </div>
       )}
 
-      {/* ================= SUBMODAL CONFIRMAR PAGO INDIVIDUAL ================= */}
+      {/* Submodal Pago Individual */}
       {cobroAPagar && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-100 animate-scale-up">
@@ -830,7 +850,7 @@ export function ListadoCobros() {
         </div>
       )}
 
-      {/* ================= MODAL RECIBO OFICIAL ================= */}
+      {/* Modal Recibo Oficial */}
       {reciboData && (
         <Recibo
           reciboData={reciboData}

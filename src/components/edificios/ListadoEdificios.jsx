@@ -2,11 +2,13 @@ import { useState, useEffect } from 'react';
 import { Building2, MapPin, Edit2, Trash2, Search, Loader2, Plus, Home, Compass } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
+import { ModalEditarEdificio } from '../Modals/ModalEditarEdificio';
 
-export function ListadoEdificios({ onNuevoEdificioClick, onEditarEdificioClick }) {
+export function ListadoEdificios({ onNuevoEdificioClick }) {
   const [edificios, setEdificios] = useState([]);
   const [busqueda, setBusqueda] = useState('');
   const [loading, setLoading] = useState(true);
+  const [edificioAEditar, setEdificioAEditar] = useState(null);
 
   useEffect(() => {
     cargarEdificios();
@@ -28,6 +30,30 @@ export function ListadoEdificios({ onNuevoEdificioClick, onEditarEdificioClick }
     }
   };
 
+  const handleEdicionExitosa = (edificioActualizado) => {
+    const idTarget = (edificioActualizado.id_edificio || edificioActualizado.id)?.toString();
+
+    setEdificios((prev) =>
+      prev.map((e) => {
+        const idActual = (e.id_edificio || e.id)?.toString();
+        if (idActual !== idTarget) return e;
+
+        return {
+          ...e,
+          ...edificioActualizado,
+          // Mantener contadores de disponibilidad existentes
+          disponibles: e.disponibles,
+          ocupados: e.ocupados,
+          total_registrados: e.total_registrados,
+          capacidad_declarada:
+            edificioActualizado.total_departamentos ?? e.capacidad_declarada,
+        };
+      })
+    );
+
+    setEdificioAEditar(null);
+  };
+
   const handleDelete = async (id, nombre) => {
     if (!window.confirm(`¿Estás seguro de eliminar el edificio "${nombre}"?`)) return;
 
@@ -44,24 +70,30 @@ export function ListadoEdificios({ onNuevoEdificioClick, onEditarEdificioClick }
       }
 
       toast.success('Edificio eliminado correctamente', { id: toastId });
-      setEdificios(prev => prev.filter(e => (e.id_edificio || e.id)?.toString() !== id.toString()));
+      setEdificios((prev) =>
+        prev.filter((e) => (e.id_edificio || e.id)?.toString() !== id.toString())
+      );
     } catch (error) {
       toast.error(error.message || 'Error al eliminar edificio', { id: toastId });
     }
   };
 
-  const edificiosFiltrados = edificios.filter(edificio => {
+  const edificiosFiltrados = edificios.filter((edificio) => {
     const term = busqueda.toLowerCase().trim();
     const nombre = (edificio.nombre || '').toLowerCase();
     const ciudad = (edificio.ciudad || '').toLowerCase();
     const provincia = (edificio.provincia || '').toLowerCase();
     const direccion = (edificio.direccion || '').toLowerCase();
-    return nombre.includes(term) || ciudad.includes(term) || provincia.includes(term) || direccion.includes(term);
+    return (
+      nombre.includes(term) ||
+      ciudad.includes(term) ||
+      provincia.includes(term) ||
+      direccion.includes(term)
+    );
   });
 
   return (
-    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 animate-fade-in">
-      
+    <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 animate-fade-in relative">
       {/* Cabecera */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
@@ -71,7 +103,7 @@ export function ListadoEdificios({ onNuevoEdificioClick, onEditarEdificioClick }
 
         <button 
           onClick={onNuevoEdificioClick}
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/20 active:scale-95"
+          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/20 active:scale-95 cursor-pointer"
         >
           <Plus size={18} />
           Registrar Nuevo
@@ -119,12 +151,20 @@ export function ListadoEdificios({ onNuevoEdificioClick, onEditarEdificioClick }
 
                   return (
                     <tr key={id} className="hover:bg-slate-50/80 transition-colors">
-                      {/* Nombre del edificio */}
+                      {/* Nombre y Portada */}
                       <td className="py-4 px-4 font-bold text-slate-900">
                         <div className="flex items-center gap-3">
-                          <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl shrink-0">
-                            <Building2 size={18} />
-                          </div>
+                          {edificio.imagen ? (
+                            <img
+                              src={edificio.imagen}
+                              alt={edificio.nombre}
+                              className="w-10 h-10 rounded-xl object-cover border border-slate-200 shrink-0"
+                            />
+                          ) : (
+                            <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl shrink-0">
+                              <Building2 size={18} />
+                            </div>
+                          )}
                           <div>
                             <span className="truncate max-w-xs block font-extrabold text-slate-900">{edificio.nombre}</span>
                             <span className="text-xs text-slate-400 font-medium">{edificio.direccion}</span>
@@ -152,7 +192,7 @@ export function ListadoEdificios({ onNuevoEdificioClick, onEditarEdificioClick }
                         </span>
                       </td>
 
-                      {/* Relación de Disponibilidad */}
+                      {/* Disponibilidad */}
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-2">
                           <span className="px-2.5 py-1 bg-emerald-50 text-emerald-700 rounded-lg font-extrabold text-xs border border-emerald-200/60 flex items-center gap-1">
@@ -171,17 +211,19 @@ export function ListadoEdificios({ onNuevoEdificioClick, onEditarEdificioClick }
                       <td className="py-4 px-4 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button 
-                            onClick={() => onEditarEdificioClick && onEditarEdificioClick(edificio)}
-                            title="Editar"
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            type="button"
+                            onClick={() => setEdificioAEditar(edificio)}
+                            title="Editar Edificio"
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
                           >
                             <Edit2 size={17} />
                           </button>
 
                           <button 
+                            type="button"
                             onClick={() => handleDelete(id, edificio.nombre)}
-                            title="Eliminar"
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            title="Eliminar Edificio"
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                           >
                             <Trash2 size={17} />
                           </button>
@@ -202,6 +244,14 @@ export function ListadoEdificios({ onNuevoEdificioClick, onEditarEdificioClick }
         )}
       </div>
 
+      {/* Modal de Edición */}
+      {edificioAEditar && (
+        <ModalEditarEdificio
+          edificio={edificioAEditar}
+          onClose={() => setEdificioAEditar(null)}
+          onSuccess={handleEdicionExitosa}
+        />
+      )}
     </div>
   );
 }
