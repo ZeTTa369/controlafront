@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { Building2, MapPin, Edit2, Trash2, Search, Loader2, Plus, Home, Compass } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
-import { ModalEditarEdificio } from '../Modals/ModalEditarEdificio';
+import { ModalEditarEdificio } from '../modals/ModalEditarEdificio';
 
 export function ListadoEdificios({ onNuevoEdificioClick }) {
   const [edificios, setEdificios] = useState([]);

@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
-import { ModalEditarDepartamento } from '../Modals/ModalEditarDepartamento';
+import { ModalEditarDepartamento } from '../modals/ModalEditarDepartamento';
 import { obtenerFotosDepartamento } from '../../services/departamentoService';
 
 export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
