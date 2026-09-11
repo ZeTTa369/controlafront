@@ -13,7 +13,10 @@ import {
   Clock,
   Printer,
   Lock,
-  CreditCard
+  CreditCard,
+  Sliders,
+  Sparkles,
+  Info
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
@@ -54,13 +57,21 @@ export function ListadoCobros() {
   // Modal Principal: Contrato Activo
   const [contratoActivoId, setContratoActivoId] = useState(null);
 
-  // Submodal: Cobro Individual
+  // Submodal: Cobro Individual y Ajuste de Excepción
   const [cobroAPagar, setCobroAPagar] = useState(null);
   const [submittingPago, setSubmittingPago] = useState(false);
+  
+  // Estado del formulario de pago + Ajustes
   const [formPago, setFormPago] = useState({
     monto: '',
     metodo_pago: 'EFECTIVO',
-    comprobante: ''
+    comprobante: '',
+    aplicarAjuste: false,
+    tipoAjuste: 'DIAS', // 'DIAS' | 'PERSONAS' | 'MANUAL'
+    diasPresentes: 15,
+    personasAjustadas: 1,
+    montoAjustadoManual: '',
+    motivoAjuste: ''
   });
 
   // Modal Recibo
@@ -95,7 +106,6 @@ export function ListadoCobros() {
       }
       setConceptosMap(mapC);
 
-      // Ahora guardamos el objeto completo del edificio (nombre, direccion, etc.)
       const mapEd = {};
       if (Array.isArray(dataEdificios)) {
         dataEdificios.forEach(e => { 
@@ -145,7 +155,7 @@ export function ListadoCobros() {
     }
   };
 
-  // Cálculo reactivo de tarjetas de contratos
+  // Cálculo de contratos activos
   const tarjetasContratos = useMemo(() => {
     const hoyStr = new Date().toISOString().split('T')[0];
 
@@ -214,13 +224,12 @@ export function ListadoCobros() {
     });
   }, [contratos, cobros, departamentosMap, edificiosMap, usuariosMap]);
 
-  // Contrato actualmente abierto
   const contratoActivo = useMemo(() => {
     if (!contratoActivoId) return null;
     return tarjetasContratos.find(c => Number(c.idContrato) === Number(contratoActivoId)) || null;
   }, [contratoActivoId, tarjetasContratos]);
 
-  // Cobros del contrato activo agrupados por período mensual
+  // Agrupación mensual con orden cronológico
   const gruposMensualesContrato = useMemo(() => {
     if (!contratoActivoId) return [];
     const cobrosDelContrato = cobros.filter(c => Number(c.id_contrato) === Number(contratoActivoId));
@@ -262,27 +271,60 @@ export function ListadoCobros() {
     });
 
     return Object.values(grupos)
-      .sort((a, b) => b.clave.localeCompare(a.clave))
       .map(g => ({
         ...g,
         estaCompletamentePagado: g.items.length > 0 && 
           g.items.every(it => it.esPagado) && 
           g.totalSaldo === 0,
-      }));
+      }))
+      .sort((a, b) => a.clave.localeCompare(b.clave));
   }, [contratoActivoId, cobros]);
 
+  // Abrir Modal de Pago con estado inicial
   const abrirFormPago = (cobro) => {
     const esPagado = (cobro.estado || '').toUpperCase() === 'PAGADO';
-    const saldo = esPagado ? 0 : (cobro.saldo_pendiente ?? cobro.monto);
+    const saldo = esPagado ? 0 : Number(cobro.saldo_pendiente ?? cobro.monto ?? 0);
+    const cantPersonasContrato = contratoActivo?.personas || 1;
 
     setCobroAPagar(cobro);
     setFormPago({
       monto: saldo,
       metodo_pago: 'EFECTIVO',
-      comprobante: ''
+      comprobante: '',
+      aplicarAjuste: false,
+      tipoAjuste: 'MANUAL',
+      diasPresentes: 15,
+      personasAjustadas: cantPersonasContrato,
+      montoAjustadoManual: saldo.toString(),
+      motivoAjuste: ''
     });
   };
 
+  // Recalcular el monto automáticamente según el tipo de ajuste
+  const recalcularMontoAjuste = (tipo, valor) => {
+    if (!cobroAPagar) return;
+    const montoBase = Number(cobroAPagar.monto || 0);
+    const cantPersonasBase = contratoActivo?.personas || 1;
+
+    let nuevoCalculado = montoBase;
+
+    if (tipo === 'DIAS') {
+      const dias = Math.max(1, Math.min(30, Number(valor)));
+      nuevoCalculado = Number(((montoBase / 30) * dias).toFixed(2));
+    } else if (tipo === 'PERSONAS') {
+      const personas = Math.max(1, Number(valor));
+      const valorPorPersona = montoBase / cantPersonasBase;
+      nuevoCalculado = Number((valorPorPersona * personas).toFixed(2));
+    }
+
+    setFormPago(prev => ({
+      ...prev,
+      monto: nuevoCalculado,
+      montoAjustadoManual: nuevoCalculado.toString()
+    }));
+  };
+
+  // Envío del pago + Excepción
   const handleConfirmarPago = async (e) => {
     e.preventDefault();
     if (!cobroAPagar) return;
@@ -290,41 +332,61 @@ export function ListadoCobros() {
     const idTarget = cobroAPagar.id_cobro || cobroAPagar.id;
     const montoPagado = Number(formPago.monto);
 
+    if (formPago.aplicarAjuste && !formPago.motivoAjuste.trim()) {
+      toast.error('Por favor escribe el motivo del ajuste o excepción.');
+      return;
+    }
+
     setSubmittingPago(true);
-    const toastId = toast.loading('Registrando cobro...');
+    const toastId = toast.loading('Procesando cobro y excepción...');
 
     try {
+      const payload = {
+        monto: montoPagado,
+        metodo_pago: formPago.metodo_pago,
+        comprobante: formPago.comprobante || null,
+        ...(formPago.aplicarAjuste ? {
+          nuevo_monto: montoPagado,
+          motivo_ajuste: formPago.motivoAjuste.trim()
+        } : {})
+      };
+
       const response = await fetch(`${BASE_URL}/cobros/${idTarget}/pagar`, {
         method: 'POST',
         headers: getAuthHeaders(),
-        body: JSON.stringify({
-          monto: montoPagado,
-          metodo_pago: formPago.metodo_pago,
-          comprobante: formPago.comprobante || null
-        }),
+        body: JSON.stringify(payload),
       });
 
       const dataRespuesta = await handleResponse(response);
 
+      // Actualizar inmediatamente la lista de cobros en memoria
       setCobros(prevCobros => prevCobros.map(c => {
         if (Number(c.id_cobro || c.id) !== Number(idTarget)) return c;
 
-        const saldoPrevio = c.saldo_pendiente !== undefined && c.saldo_pendiente !== null
-          ? Number(c.saldo_pendiente)
-          : Number(c.monto || 0);
+        // Si se aplicó un ajuste, el monto total del cobro se ajusta exactamente al nuevo monto
+        const nuevoMontoDefinitivo = formPago.aplicarAjuste ? montoPagado : Number(c.monto);
+        
+        // Si se aplicó ajuste, el saldo queda en 0 y el cobro queda totalmente pagado
+        const nuevoSaldo = formPago.aplicarAjuste 
+          ? 0 
+          : Math.max(0, (c.saldo_pendiente !== undefined && c.saldo_pendiente !== null ? Number(c.saldo_pendiente) : nuevoMontoDefinitivo) - montoPagado);
 
-        const nuevoSaldo = Math.max(0, saldoPrevio - montoPagado);
         const nuevoEstado = nuevoSaldo === 0 ? 'PAGADO' : 'PENDIENTE';
 
         return {
           ...c,
-          ...(dataRespuesta || {}),
+          ...(dataRespuesta?.cobro || {}),
+          monto: nuevoMontoDefinitivo,
           saldo_pendiente: nuevoSaldo,
           estado: nuevoEstado,
+          ...(formPago.aplicarAjuste ? {
+            motivo_ajuste: formPago.motivoAjuste.trim(),
+            monto_original: c.monto_original || c.monto
+          } : {})
         };
       }));
 
-      toast.success('¡Cobro registrado exitosamente!', { id: toastId });
+      toast.success('¡Cobro y ajuste registrados exitosamente!', { id: toastId });
       setCobroAPagar(null);
     } catch (error) {
       toast.error(error.message || 'Error al procesar cobro', { id: toastId });
@@ -333,7 +395,6 @@ export function ListadoCobros() {
     }
   };
 
-  // Filtrado de tarjetas
   const tarjetasFiltradas = useMemo(() => {
     return tarjetasContratos.filter(card => {
       const term = busqueda.toLowerCase().trim();
@@ -464,7 +525,7 @@ export function ListadoCobros() {
         </div>
       </div>
 
-      {/* Cuadrícula de Tarjetas */}
+      {/* Tarjetas de Contratos */}
       {loading ? (
         <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
           <Loader2 size={32} className="animate-spin text-blue-600" />
@@ -685,20 +746,37 @@ export function ListadoCobros() {
                           const monto = Number(cobro.monto || 0);
                           const saldo = cobro.saldoCalculado;
                           const conceptoNombre = conceptosMap[cobro.id_concepto] || cobro.descripcion || 'Alquiler';
+                          const tieneAjuste = Boolean(cobro.motivo_ajuste || cobro.monto_original);
 
                           return (
                             <tr key={id} className="hover:bg-slate-50/50 transition-colors">
                               <td className="py-3 px-4">
-                                <span className="font-bold text-slate-800 text-xs block">{conceptoNombre}</span>
-                                {cobro.descripcion && cobro.descripcion !== conceptoNombre && (
-                                  <span className="text-[11px] text-slate-400">{cobro.descripcion}</span>
-                                )}
+                                <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                                  {conceptoNombre}
+                                  {tieneAjuste && (
+                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-blue-100 text-blue-800 border border-blue-200">
+                                      Ajustado
+                                    </span>
+                                  )}
+                                </span>
+                                {cobro.motivo_ajuste ? (
+                                  <span className="text-[11px] font-medium text-blue-600 block italic">
+                                    Nota: {cobro.motivo_ajuste}
+                                  </span>
+                                ) : cobro.descripcion && cobro.descripcion !== conceptoNombre ? (
+                                  <span className="text-[11px] text-slate-400 block">{cobro.descripcion}</span>
+                                ) : null}
                               </td>
 
                               <td className="py-3 px-4">
                                 <span className="font-extrabold text-slate-900 text-xs">
                                   {monto.toFixed(2)} {cobro.moneda || 'BOB'}
                                 </span>
+                                {cobro.monto_original && Number(cobro.monto_original) !== monto && (
+                                  <span className="text-[10px] text-slate-400 line-through block">
+                                    Orig: {Number(cobro.monto_original).toFixed(2)}
+                                  </span>
+                                )}
                                 {!esPagado && saldo < monto && saldo > 0 && (
                                   <span className="text-[11px] font-bold text-amber-600 block">Saldo: {saldo.toFixed(2)}</span>
                                 )}
@@ -762,39 +840,223 @@ export function ListadoCobros() {
         </div>
       )}
 
-      {/* Submodal Pago Individual */}
+      {/* ================= SUBMODAL PAGO INDIVIDUAL CON AJUSTE Y EXCEPCIONES ================= */}
       {cobroAPagar && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-fade-in">
-          <div className="bg-white rounded-2xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-100 animate-scale-up">
+          <div className="bg-white rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl border border-slate-100 animate-scale-up">
+            
             <div className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2.5">
                 <CreditCard size={20} className="text-emerald-400" />
-                <h3 className="font-extrabold text-base">Registrar Cobro de Cuota</h3>
+                <div>
+                  <h3 className="font-extrabold text-sm sm:text-base">
+                    Cobrar Cuota: {conceptosMap[cobroAPagar.id_concepto] || cobroAPagar.descripcion || 'Servicio'}
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Contrato: {contratoActivo?.inquilino} • Unidad {contratoActivo?.deptoNumero}
+                  </p>
+                </div>
               </div>
               <button 
                 type="button"
                 onClick={() => setCobroAPagar(null)} 
-                className="text-slate-400 hover:text-white"
+                className="text-slate-400 hover:text-white p-1 rounded-lg"
               >
                 <X size={18} />
               </button>
             </div>
 
-            <form onSubmit={handleConfirmarPago} className="p-6 space-y-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
-                  Monto a Cobrar ({cobroAPagar.moneda || 'BOB'}) *
-                </label>
-                <input 
-                  type="number" 
-                  step="0.01" 
-                  required
-                  value={formPago.monto} 
-                  onChange={(e) => setFormPago({ ...formPago, monto: e.target.value })}
-                  className="w-full py-3 px-4 border-2 border-slate-200 rounded-xl font-black text-xl text-slate-900 outline-none focus:border-emerald-600 bg-slate-50"
-                />
+            <form onSubmit={handleConfirmarPago} className="p-6 space-y-4 max-h-[85vh] overflow-y-auto">
+              
+              {/* Opción de Habilitar Ajuste / Excepción */}
+              <div className="bg-blue-50/70 border border-blue-200 rounded-2xl p-3.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Sliders size={16} className="text-blue-600" />
+                    <span className="text-xs font-extrabold text-blue-900">
+                      ¿Aplicar rebaja o excepción en este cobro?
+                    </span>
+                  </div>
+                  <label className="relative inline-flex items-center cursor-pointer">
+                    <input 
+                      type="checkbox" 
+                      className="sr-only peer"
+                      checked={formPago.aplicarAjuste}
+                      onChange={(e) => {
+                        const activo = e.target.checked;
+                        const montoOriginal = cobroAPagar.saldo_pendiente ?? cobroAPagar.monto;
+                        setFormPago({
+                          ...formPago,
+                          aplicarAjuste: activo,
+                          monto: montoOriginal,
+                          montoAjustadoManual: montoOriginal.toString(),
+                          motivoAjuste: activo ? formPago.motivoAjuste : ''
+                        });
+                      }}
+                    />
+                    <div className="w-10 h-5 bg-slate-300 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-slate-300 after:border after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-blue-600"></div>
+                  </label>
+                </div>
+
+                {/* Bloque expandible de ajuste */}
+                {formPago.aplicarAjuste && (
+                  <div className="mt-3 pt-3 border-t border-blue-200/80 space-y-3">
+                    
+                    {/* Selector de Modo */}
+                    <div className="grid grid-cols-3 gap-1.5 p-1 bg-white rounded-xl border border-blue-200 text-xs font-bold">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormPago(prev => ({ ...prev, tipoAjuste: 'DIAS' }));
+                          recalcularMontoAjuste('DIAS', formPago.diasPresentes);
+                        }}
+                        className={`py-1.5 rounded-lg transition-all ${
+                          formPago.tipoAjuste === 'DIAS' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-blue-600'
+                        }`}
+                      >
+                        Por Días (Viaje)
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFormPago(prev => ({ ...prev, tipoAjuste: 'PERSONAS' }));
+                          recalcularMontoAjuste('PERSONAS', formPago.personasAjustadas);
+                        }}
+                        className={`py-1.5 rounded-lg transition-all ${
+                          formPago.tipoAjuste === 'PERSONAS' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-blue-600'
+                        }`}
+                      >
+                        Por Personas
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setFormPago(prev => ({ ...prev, tipoAjuste: 'MANUAL' }))}
+                        className={`py-1.5 rounded-lg transition-all ${
+                          formPago.tipoAjuste === 'MANUAL' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-blue-600'
+                        }`}
+                      >
+                        Monto Directo
+                      </button>
+                    </div>
+
+                    {/* Modo 1: Por Días */}
+                    {formPago.tipoAjuste === 'DIAS' && (
+                      <div className="bg-white p-3 rounded-xl border border-blue-100 space-y-1.5">
+                        <div className="flex justify-between text-xs font-bold text-slate-700">
+                          <span>Días habitados este mes:</span>
+                          <span className="text-blue-600 font-extrabold">{formPago.diasPresentes} de 30 días</span>
+                        </div>
+                        <input 
+                          type="range"
+                          min="1"
+                          max="30"
+                          value={formPago.diasPresentes}
+                          onChange={(e) => {
+                            const d = Number(e.target.value);
+                            setFormPago(prev => ({ ...prev, diasPresentes: d }));
+                            recalcularMontoAjuste('DIAS', d);
+                          }}
+                          className="w-full accent-blue-600 cursor-pointer"
+                        />
+                        <span className="text-[11px] text-slate-400 block">
+                          Prorratea el total del mes sobre una base estándar de 30 días.
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Modo 2: Por Personas */}
+                    {formPago.tipoAjuste === 'PERSONAS' && (
+                      <div className="bg-white p-3 rounded-xl border border-blue-100 flex items-center justify-between">
+                        <label className="text-xs font-bold text-slate-700">
+                          Personas presentes en el mes:
+                        </label>
+                        <input 
+                          type="number"
+                          min="1"
+                          max="15"
+                          value={formPago.personasAjustadas}
+                          onChange={(e) => {
+                            const p = Number(e.target.value);
+                            setFormPago(prev => ({ ...prev, personasAjustadas: p }));
+                            recalcularMontoAjuste('PERSONAS', p);
+                          }}
+                          className="w-20 py-1.5 px-3 border border-slate-300 rounded-lg text-sm font-black text-center text-slate-800 outline-none focus:border-blue-600"
+                        />
+                      </div>
+                    )}
+
+                    {/* Modo 3: Monto Manual */}
+                    {formPago.tipoAjuste === 'MANUAL' && (
+                      <div className="bg-white p-3 rounded-xl border border-blue-100 flex items-center justify-between">
+                        <label className="text-xs font-bold text-slate-700">
+                          Importe acordado (Bs.):
+                        </label>
+                        <input 
+                          type="number"
+                          step="0.01"
+                          value={formPago.montoAjustadoManual}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            setFormPago(prev => ({ 
+                              ...prev, 
+                              montoAjustadoManual: val, 
+                              monto: val 
+                            }));
+                          }}
+                          className="w-28 py-1.5 px-3 border border-slate-300 rounded-lg text-sm font-black text-right text-slate-800 outline-none focus:border-blue-600"
+                        />
+                      </div>
+                    )}
+
+                    {/* Campo de Motivo */}
+                    <div>
+                      <label className="block text-xs font-extrabold text-blue-900 mb-1">
+                        Motivo de la excepción / observación *
+                      </label>
+                      <input 
+                        type="text"
+                        required={formPago.aplicarAjuste}
+                        placeholder="Ej. Viaje 15 días, Visitas familiares, Descuento autorizado..."
+                        value={formPago.motivoAjuste}
+                        onChange={(e) => setFormPago({ ...formPago, motivoAjuste: e.target.value })}
+                        className="w-full py-2 px-3 bg-white border border-blue-300 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:border-blue-600"
+                      />
+                    </div>
+
+                  </div>
+                )}
               </div>
 
+              {/* Monto Final a Cobrar */}
+              <div>
+                <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
+                  Monto Final a Cobrar ({cobroAPagar.moneda || 'BOB'}) *
+                </label>
+                <div className="relative">
+                  <input 
+                    type="number" 
+                    step="0.01" 
+                    required
+                    value={formPago.monto} 
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setFormPago(prev => ({
+                        ...prev,
+                        monto: val,
+                        montoAjustadoManual: val
+                      }));
+                    }}
+                    className="w-full py-3 px-4 border-2 border-slate-200 rounded-xl font-black text-2xl text-slate-900 outline-none focus:border-emerald-600 bg-slate-50"
+                  />
+                  {formPago.aplicarAjuste && (
+                    <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-extrabold text-blue-600 bg-blue-50 px-2 py-1 rounded-md border border-blue-200">
+                      Modificado
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Método de Pago */}
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
                   Método de Pago *
@@ -802,7 +1064,7 @@ export function ListadoCobros() {
                 <select 
                   value={formPago.metodo_pago} 
                   onChange={(e) => setFormPago({ ...formPago, metodo_pago: e.target.value })}
-                  className="w-full py-3 px-4 border-2 border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-emerald-600 bg-white cursor-pointer"
+                  className="w-full py-3 px-4 border-2 border-slate-200 rounded-xl font-bold text-slate-800 outline-none focus:border-emerald-600 bg-white cursor-pointer text-sm"
                 >
                   <option value="EFECTIVO">Efectivo</option>
                   <option value="TRANSFERENCIA">Transferencia Bancaria / QR</option>
@@ -810,6 +1072,7 @@ export function ListadoCobros() {
                 </select>
               </div>
 
+              {/* Comprobante */}
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
                   Nº Comprobante / Transacción (Opcional)
@@ -819,10 +1082,11 @@ export function ListadoCobros() {
                   placeholder="Ej. TR-89104"
                   value={formPago.comprobante} 
                   onChange={(e) => setFormPago({ ...formPago, comprobante: e.target.value })}
-                  className="w-full py-3 px-4 border-2 border-slate-200 rounded-xl font-medium text-slate-800 outline-none focus:border-emerald-600 bg-slate-50 text-sm"
+                  className="w-full py-2.5 px-4 border-2 border-slate-200 rounded-xl font-medium text-slate-800 outline-none focus:border-emerald-600 bg-slate-50 text-sm"
                 />
               </div>
 
+              {/* Botones de Acción */}
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                 <button 
                   type="button" 
@@ -841,10 +1105,11 @@ export function ListadoCobros() {
                       <Loader2 size={16} className="animate-spin" /> Procesando...
                     </>
                   ) : (
-                    'Confirmar Cobro'
+                    'Confirmar y Cobrar'
                   )}
                 </button>
               </div>
+
             </form>
           </div>
         </div>

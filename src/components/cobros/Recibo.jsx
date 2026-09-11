@@ -89,7 +89,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
   // 3. Monto total
   const montoTotal = Number(grupo.totalMonto ?? 0);
 
-  // 4. Cálculo dinámico de fechas de inicio y fin del mes si no vienen explícitas
+  // 4. Fechas de inicio y fin del mes
   let fDesde = grupo.fechaInicio ? formatCorto(grupo.fechaInicio) : '';
   let fHasta = grupo.fechaFin ? formatCorto(grupo.fechaFin) : '';
 
@@ -106,18 +106,46 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
   const cantPersonas = contrato.personas || 2;
   const nombrePeriodo = (grupo.nombrePeriodo || `JULIO ${anioPeriodo}`).toUpperCase();
 
-  // 6. Construcción idéntica del texto: PAGO DEP [NRO] DEL [DD/MM/AA] AL [DD/MM/AA] + AGUA Y LUZ [X] PERSONAS ([MES AÑO])
+  // 6. Construcción dinámica del concepto con soporte para ajustes / excepciones
   const items = Array.isArray(grupo.items) ? grupo.items : [];
-  const cobraAgua = items.some(it => (conceptosMap[it.id_concepto] || it.descripcion || '').toUpperCase().includes('AGUA'));
-  const cobraLuz = items.some(it => (conceptosMap[it.id_concepto] || it.descripcion || '').toUpperCase().includes('LUZ'));
+
+  const itemAgua = items.find(it => (conceptosMap[it.id_concepto] || it.descripcion || '').toUpperCase().includes('AGUA'));
+  const itemLuz = items.find(it => (conceptosMap[it.id_concepto] || it.descripcion || '').toUpperCase().includes('LUZ'));
+
+  const cobraAgua = Boolean(itemAgua);
+  const cobraLuz = Boolean(itemLuz);
+
+  // Extraer motivos de ajuste si existen
+  const motivoAgua = itemAgua?.motivo_ajuste || '';
+  const motivoLuz = itemLuz?.motivo_ajuste || '';
+  const motivoGeneral = items.find(it => it.motivo_ajuste)?.motivo_ajuste || '';
 
   let textoServicios = '';
+
   if (cobraAgua && cobraLuz) {
-    textoServicios = ` + AGUA Y LUZ ${cantPersonas} PERSONAS`;
+    if (motivoAgua && motivoLuz && motivoAgua === motivoLuz) {
+      textoServicios = ` + AGUA Y LUZ (${motivoAgua.toUpperCase()})`;
+    } else if (motivoAgua) {
+      textoServicios = ` + AGUA (${motivoAgua.toUpperCase()}) Y LUZ ${cantPersonas} PERSONAS`;
+    } else if (motivoLuz) {
+      textoServicios = ` + AGUA ${cantPersonas} PERSONAS Y LUZ (${motivoLuz.toUpperCase()})`;
+    } else {
+      textoServicios = ` + AGUA Y LUZ ${cantPersonas} PERSONAS`;
+    }
   } else if (cobraAgua) {
-    textoServicios = ` + AGUA ${cantPersonas} ${cantPersonas > 1 ? 'PERSONAS' : 'PERSONA'}`;
+    if (motivoAgua) {
+      textoServicios = ` + AGUA (${motivoAgua.toUpperCase()})`;
+    } else {
+      textoServicios = ` + AGUA ${cantPersonas} ${cantPersonas > 1 ? 'PERSONAS' : 'PERSONA'}`;
+    }
   } else if (cobraLuz) {
-    textoServicios = ` + LUZ ${cantPersonas} ${cantPersonas > 1 ? 'PERSONAS' : 'PERSONA'}`;
+    if (motivoLuz) {
+      textoServicios = ` + LUZ (${motivoLuz.toUpperCase()})`;
+    } else {
+      textoServicios = ` + LUZ ${cantPersonas} ${cantPersonas > 1 ? 'PERSONAS' : 'PERSONA'}`;
+    }
+  } else if (motivoGeneral) {
+    textoServicios = ` (${motivoGeneral.toUpperCase()})`;
   }
 
   const textoConcepto = `PAGO DEP ${numDepto} DEL ${fDesde} AL ${fHasta}${textoServicios} (${nombrePeriodo})`;
@@ -148,7 +176,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
           
           <div className="w-full max-w-xl bg-white border-2 border-[#1a365d] rounded-[24px] p-7 shadow-sm text-slate-900 font-sans print:border-2 print:border-black print:rounded-2xl print:shadow-none">
             
-            {/* Título Superior sincronizado con el año del período */}
+            {/* Título Superior */}
             <h1 className="text-center font-black text-2xl tracking-wider text-[#102a45] uppercase mb-4">
               RECIBO DE PAGO/{anioPeriodo}
             </h1>
@@ -258,7 +286,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
                 </div>
               </div>
 
-              {/* Firma Recibí Conforme (Rúbrica idéntica al modelo LCA) */}
+              {/* Firma Recibí Conforme */}
               <div className="col-span-4 text-center">
                 <div className="h-10 flex items-end justify-center mb-1">
                   <svg
@@ -270,11 +298,8 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    {/* Trazado de la 'L' inclinada */}
                     <path d="M 28 45 C 18 25, 22 8, 38 10 C 45 12, 35 38, 22 42 C 32 44, 48 38, 62 30" />
-                    {/* Bucle central manuscrito */}
                     <path d="M 52 38 C 48 24, 65 18, 72 26 C 76 32, 60 42, 85 36" />
-                    {/* Trazado final y remate horizontal cruzado */}
                     <path d="M 85 35 C 98 25, 115 15, 132 28 C 122 36, 128 42, 148 36" />
                     <path d="M 38 34 L 140 30" strokeWidth="1.8" />
                   </svg>
@@ -288,7 +313,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
 
               <div className="col-span-1"></div>
 
-              {/* Firma Entregué Conforme (Check limpio del modelo) */}
+              {/* Firma Entregué Conforme */}
               <div className="col-span-4 text-center">
                 <div className="h-10 flex items-end justify-center mb-1">
                   <svg
