@@ -462,7 +462,7 @@ export const CatalogoEdificios = () => {
                           </div>
 
                           <a
-                            href={`https://wa.me/59170000000?text=${encodeURIComponent(
+                            href={`https://wa.me/59162705608?text=${encodeURIComponent(
                               `Hola, estoy interesado en alquilar la Unidad ${depto.numero_departamento || depto.numero} en ${edificioSeleccionado.nombre}.`
                             )}`}
                             target="_blank"
