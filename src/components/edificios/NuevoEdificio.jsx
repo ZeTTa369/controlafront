@@ -8,7 +8,8 @@ import {
   Layers,
   Loader2,
   Trash2,
-  CheckCircle2
+  CheckCircle2,
+  ExternalLink
 } from "lucide-react";
 import toast from "react-hot-toast";
 import { BASE_URL, getAuthHeaders, handleResponse } from "../../api/config";
@@ -22,6 +23,7 @@ export function NuevoEdificio({ onClose, onSave }) {
     ciudad: "Cochabamba",
     provincia: "Cochabamba",
     direccion: "",
+    ubicacion_url: "",
     categoria: "Vivienda Familiar",
     totalDepartamentos: "1",
     tieneParqueoMoto: false,
@@ -101,6 +103,7 @@ export function NuevoEdificio({ onClose, onSave }) {
         ciudad: formData.ciudad,
         provincia: formData.provincia,
         imagen: formData.imagen || null,
+        ubicacion_url: formData.ubicacion_url.trim() || null,
         total_departamentos: Number(formData.totalDepartamentos) || 1,
         estado: formData.categoria,
         tiene_parqueo_moto: formData.tieneParqueoMoto,
@@ -244,6 +247,44 @@ export function NuevoEdificio({ onClose, onSave }) {
               className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white text-sm font-medium"
             />
           </div>
+        </div>
+
+        {/* Enlace de Google Maps */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
+              Enlace de Google Maps (Ubicación)
+            </label>
+            <span className="text-[11px] font-semibold text-slate-400">Opcional</span>
+          </div>
+          <div className="relative flex items-center group">
+            <MapPin
+              size={18}
+              className="absolute left-4 text-blue-500 group-focus-within:text-blue-600 transition-colors pointer-events-none"
+            />
+            <input
+              type="url"
+              name="ubicacion_url"
+              placeholder="Ej. https://maps.app.goo.gl/... o https://goo.gl/maps/..."
+              value={formData.ubicacion_url}
+              onChange={handleChange}
+              className="w-full py-3.5 pl-11 pr-12 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white text-sm font-medium"
+            />
+            {formData.ubicacion_url.trim() && (
+              <a
+                href={formData.ubicacion_url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="absolute right-3.5 text-slate-400 hover:text-blue-600 p-1 rounded-md transition-colors"
+                title="Probar enlace"
+              >
+                <ExternalLink size={16} />
+              </a>
+            )}
+          </div>
+          <p className="text-[11px] text-slate-400 mt-1">
+            Pega el link compartido desde Google Maps para que los clientes puedan abrir la ubicación en el catálogo.
+          </p>
         </div>
 
         {/* Categoría y Capacidad */}
