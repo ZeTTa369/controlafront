@@ -6,18 +6,18 @@ import {
   MapPin, 
   Home, 
   CheckCircle2, 
-  UserCircle,
-  Loader2,
-  X,
-  BedDouble,
-  Bath,
-  Layers,
-  Compass,
-  PhoneCall,
-  Camera,
-  ChevronLeft,
-  ChevronRight,
-  ImageIcon
+  UserCircle, 
+  Loader2, 
+  X, 
+  BedDouble, 
+  Bath, 
+  Layers, 
+  Compass, 
+  PhoneCall, 
+  Camera, 
+  ChevronLeft, 
+  ChevronRight, 
+  ImageIcon 
 } from 'lucide-react';
 import { BASE_URL, handleResponse } from '../../api/config';
 
@@ -96,7 +96,7 @@ export const CatalogoEdificios = () => {
     setFotoActivaIndex((prev) => (prev === fotosDepto.length - 1 ? 0 : prev + 1));
   };
 
-  // Enriquecer cada edificio con sus departamentos disponibles y su precio base real
+  // Enriquecer cada edificio con sus departamentos disponibles, precio base y url de mapa
   const edificiosConMetricas = useMemo(() => {
     return edificios.map((ed) => {
       const idEd = ed.id_edificio || ed.id;
@@ -126,6 +126,7 @@ export const CatalogoEdificios = () => {
         unidadesDisponibles: deptosDisponibles.length,
         deptosDisponiblesList: deptosDisponibles,
         precioBase,
+        ubicacion_url: ed.ubicacion_url || ed.ubicacionUrl || null,
         imagenPortada: ed.imagen || 'https://images.unsplash.com/photo-1545324418-cc1a3fa10c00?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80'
       };
     });
@@ -180,10 +181,10 @@ export const CatalogoEdificios = () => {
           </span>
 
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tight mb-5 leading-tight">
-            Departamentos y Locales en Alquiler
+            Departamentos en Alquiler
           </h1>
           <p className="text-base md:text-lg text-slate-300 mb-10 max-w-2xl mx-auto font-medium">
-            Encuentra tu próximo hogar o espacio comercial en los mejores condominios con servicios y comodidad garantizada.
+            Tu próximo hogar está a un clic. Explora nuestros departamentos listos para habitar
           </p>
           
           {/* Buscador */}
@@ -278,10 +279,28 @@ export const CatalogoEdificios = () => {
                       <h3 className="text-xl font-black text-slate-900 mb-1.5 group-hover:text-blue-600 transition-colors">
                         {edificio.nombre}
                       </h3>
-                      <div className="flex items-start gap-1.5 text-slate-500 text-xs font-semibold">
-                        <MapPin size={15} className="shrink-0 text-slate-400 mt-0.5" />
-                        <span>{edificio.direccion}, {edificio.provincia || edificio.ciudad}</span>
-                      </div>
+                      
+                      {/* Enlace directo a Google Maps si tiene ubicacion_url */}
+                      {edificio.ubicacion_url ? (
+                        <a
+                          href={edificio.ubicacion_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="inline-flex items-start gap-1.5 text-slate-500 hover:text-blue-600 text-xs font-semibold group/map transition-colors w-fit"
+                          title="Abrir ubicación en Google Maps"
+                        >
+                          <MapPin size={15} className="shrink-0 text-blue-500 group-hover/map:scale-110 transition-transform mt-0.5" />
+                          <span className="underline decoration-slate-300 group-hover/map:decoration-blue-500 underline-offset-2">
+                            {edificio.direccion}, {edificio.provincia || edificio.ciudad}
+                          </span>
+                        </a>
+                      ) : (
+                        <div className="flex items-start gap-1.5 text-slate-500 text-xs font-semibold">
+                          <MapPin size={15} className="shrink-0 text-slate-400 mt-0.5" />
+                          <span>{edificio.direccion}, {edificio.provincia || edificio.ciudad}</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Amenidades con Emojis */}
@@ -321,7 +340,7 @@ export const CatalogoEdificios = () => {
                       </div>
 
                       <button 
-                        type="button"
+                        type="button" 
                         onClick={(e) => {
                           e.stopPropagation();
                           setEdificioSeleccionado(edificio);
@@ -360,9 +379,23 @@ export const CatalogoEdificios = () => {
                   <h3 className="font-black text-lg leading-tight">
                     {edificioSeleccionado.nombre}
                   </h3>
-                  <p className="text-xs text-slate-400 mt-0.5">
-                    {edificioSeleccionado.direccion} • {edificioSeleccionado.ciudad}
-                  </p>
+                  
+                  {edificioSeleccionado.ubicacion_url ? (
+                    <a
+                      href={edificioSeleccionado.ubicacion_url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-xs text-blue-400 hover:text-blue-300 underline underline-offset-2 mt-0.5 transition-colors"
+                      title="Abrir ubicación en Google Maps"
+                    >
+                      <MapPin size={13} />
+                      <span>{edificioSeleccionado.direccion} • {edificioSeleccionado.ciudad}</span>
+                    </a>
+                  ) : (
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      {edificioSeleccionado.direccion} • {edificioSeleccionado.ciudad}
+                    </p>
+                  )}
                 </div>
               </div>
 
@@ -463,7 +496,7 @@ export const CatalogoEdificios = () => {
 
                           <a
                             href={`https://wa.me/59162705608?text=${encodeURIComponent(
-                              `Hola, estoy interesado en alquilar la Unidad ${depto.numero_departamento || depto.numero} en ${edificioSeleccionado.nombre}.`
+                              `Hola requiero mayor información del departamento del ${edificioSeleccionado.nombre}`
                             )}`}
                             target="_blank"
                             rel="noopener noreferrer"
@@ -542,7 +575,7 @@ export const CatalogoEdificios = () => {
                     <img 
                       src={fotosDepto[fotoActivaIndex]?.url} 
                       alt="Foto departamento" 
-                      className="w-full h-full object-contain"
+                      className="w-full h-full object-contain" 
                     />
 
                     {/* Botones de navegación si hay más de una foto */}
