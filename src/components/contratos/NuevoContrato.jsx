@@ -23,9 +23,10 @@ import {
 import toast from 'react-hot-toast';
 import jsPDF from 'jspdf';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
-import { ModalNuevoHabitante } from '../modals/ModalNuevoHabitante'
+import { ModalNuevoHabitante } from '../modals/ModalNuevoHabitante';
+import { crearContrato, registrarHabitantesBatch } from '../../services/contratoService';
+import { listarUsuarios, crearUsuario } from '../../services/usuarioService';
 
-// Asigna un peso para garantizar el orden de visualización
 const getPrioridadConcepto = (nombre = '') => {
   const n = nombre.toUpperCase();
   if (n.includes('ALQUILER') || n.includes('RENTA') || n.includes('CANON')) return 1;
@@ -35,7 +36,6 @@ const getPrioridadConcepto = (nombre = '') => {
   return 5;
 };
 
-// Cálculo de días límite según la regla del múltiplo de 5
 const calcularPeriodoLimitePago = (fechaInicioStr) => {
   if (!fechaInicioStr) return { inicio: '17', fin: '20', texto: 'Del 17 al 20 de cada mes' };
 
@@ -125,7 +125,7 @@ export function NuevoContrato({ onClose, onSave }) {
     cargarCatalogos();
   }, []);
 
-  // Recalcular Agua y Luz automáticamente
+  // Recalcular Agua y Luz automáticamente al cambiar habitantes o checkbox
   useEffect(() => {
     if (!multiplicarServiciosAutomatico) return;
 
@@ -286,6 +286,7 @@ export function NuevoContrato({ onClose, onSave }) {
     return listaConceptosActivosOrdenados.reduce((acc, c) => acc + (parseFloat(c.monto) || 0), 0);
   }, [listaConceptosActivosOrdenados]);
 
+  // Consumimos listarUsuarios() desde el service
   const buscarInquilinoPorCI = async () => {
     if (!inquilinoData.ci_nit.trim()) {
       toast.error('Ingresa un CI/NIT para buscar');
@@ -294,9 +295,10 @@ export function NuevoContrato({ onClose, onSave }) {
 
     setBuscandoCI(true);
     try {
-      const res = await fetch(`${BASE_URL}/usuarios`, { headers: getAuthHeaders() });
-      const usuarios = await handleResponse(res);
-      const encontrado = usuarios.find(u => String(u.ci_nit).trim() === inquilinoData.ci_nit.trim());
+      const usuarios = await listarUsuarios();
+      const encontrado = Array.isArray(usuarios) 
+        ? usuarios.find(u => String(u.ci_nit).trim() === inquilinoData.ci_nit.trim())
+        : null;
 
       if (encontrado) {
         setInquilinoData({
@@ -310,10 +312,10 @@ export function NuevoContrato({ onClose, onSave }) {
         });
         toast.success(`Inquilino encontrado: ${encontrado.nombre} ${encontrado.primer_apellido}`);
       } else {
-        toast('No existe registro previo. Completa los datos para guardarlo.', { icon: 'ℹ️' });
+        toast('No existe registro previo. Completa los datos para crearlo automáticamente.', { icon: 'ℹ️' });
       }
     } catch (error) {
-      toast.error('Error al consultar usuarios');
+      toast.error('Error al consultar usuarios en el servidor');
     } finally {
       setBuscandoCI(false);
     }
@@ -419,7 +421,7 @@ export function NuevoContrato({ onClose, onSave }) {
       yPos += 6;
       doc.setFontSize(9);
       doc.setTextColor(71, 85, 105);
-      const nombresHabitantes = habitantes.map(h => `${h.nombres} ${h.primer_apellido}${h.ci_nit ? ` (CI: ${h.ci_nit})` : ''}`).join(', ');
+      const nombresHabitantes = habitantes.map(h => `${h.nombres} ${h.primer_apellido}${h.ci_nit ? ` (CI: ${h.ci_nit})` : ''} - ${h.parentesco}`).join(', ');
       doc.text(`Habitantes: ${nombresHabitantes}`, 28, yPos, { maxWidth: 160 });
       yPos += 5;
     }
@@ -495,33 +497,28 @@ export function NuevoContrato({ onClose, onSave }) {
     try {
       let idUsuarioFinal = inquilinoData.id_usuario;
 
-      // 1. Inquilino Titular si es nuevo
+      // 1. Inquilino Titular si no existe (usando usuarioService)
       if (!idUsuarioFinal) {
         const passwordBase = String(inquilinoData.ci_nit).trim().length >= 6 
           ? String(inquilinoData.ci_nit).trim() 
           : '123456';
 
-        const resUser = await fetch(`${BASE_URL}/usuarios`, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify({
-            nombre: inquilinoData.nombre.trim(),
-            primer_apellido: inquilinoData.primer_apellido.trim(),
-            segundo_apellido: inquilinoData.segundo_apellido?.trim() || null,
-            ci_nit: inquilinoData.ci_nit.trim(),
-            telefono: inquilinoData.telefono?.trim() || null,
-            email: inquilinoData.email?.trim() || `inquilino_${inquilinoData.ci_nit}@residencial.com`,
-            password: passwordBase,
-            rol: 3,
-            estado: 'ACTIVO',
-          }),
+        const nuevoUser = await crearUsuario({
+          nombre: inquilinoData.nombre.trim(),
+          primer_apellido: inquilinoData.primer_apellido.trim(),
+          segundo_apellido: inquilinoData.segundo_apellido?.trim() || null,
+          ci_nit: inquilinoData.ci_nit.trim(),
+          telefono: inquilinoData.telefono?.trim() || null,
+          email: inquilinoData.email?.trim() || `inquilino_${inquilinoData.ci_nit}@residencial.com`,
+          password: passwordBase,
+          rol: 3,
+          estado: 'ACTIVO',
         });
 
-        const nuevoUser = await handleResponse(resUser);
         idUsuarioFinal = nuevoUser.id_usuario || nuevoUser.id;
       }
 
-      // 2. Crear contrato
+      // 2. Crear contrato (usando contratoService)
       const conceptosIds = listaConceptosActivosOrdenados.map(c => c.id_concepto);
 
       const payloadContrato = {
@@ -536,16 +533,10 @@ export function NuevoContrato({ onClose, onSave }) {
         conceptosIds: conceptosIds,
       };
 
-      const resContrato = await fetch(`${BASE_URL}/contratos`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payloadContrato),
-      });
-
-      const dataContrato = await handleResponse(resContrato);
+      const dataContrato = await crearContrato(payloadContrato);
       const nuevoIdContrato = dataContrato.id_contrato || dataContrato.id;
 
-      // 3. Registrar habitantes en la tabla `habitante`
+      // 3. Registrar lote de habitantes (usando contratoService)
       if (habitantes.length > 0 && nuevoIdContrato) {
         const payloadHabitantes = habitantes.map(h => ({
           id_contrato: Number(nuevoIdContrato),
@@ -560,11 +551,7 @@ export function NuevoContrato({ onClose, onSave }) {
           estado: 'ACTIVO',
         }));
 
-        await fetch(`${BASE_URL}/habitantes/batch`, {
-          method: 'POST',
-          headers: getAuthHeaders(),
-          body: JSON.stringify(payloadHabitantes),
-        });
+        await registrarHabitantesBatch(payloadHabitantes);
       }
 
       generarPDFContrato();
@@ -595,7 +582,7 @@ export function NuevoContrato({ onClose, onSave }) {
         </div>
 
         {onClose && (
-          <button onClick={onClose} className="text-slate-400 hover:text-white p-2">
+          <button onClick={onClose} className="text-slate-400 hover:text-white p-2 cursor-pointer">
             <X size={20} />
           </button>
         )}
@@ -636,7 +623,7 @@ export function NuevoContrato({ onClose, onSave }) {
               name="tipo_contrato"
               value={formData.tipo_contrato}
               onChange={(e) => setFormData({ ...formData, tipo_contrato: e.target.value })}
-              className="w-full py-3.5 px-4 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-blue-600 bg-white appearance-none"
+              className="w-full py-3.5 px-4 border-2 border-slate-200 rounded-xl font-bold text-sm outline-none focus:border-blue-600 bg-white appearance-none cursor-pointer"
             >
               <option value="DIRECTO">Contratante Directo</option>
               <option value="TERCEROS">Contratante para Terceros</option>
@@ -674,7 +661,7 @@ export function NuevoContrato({ onClose, onSave }) {
               type="button"
               onClick={buscarInquilinoPorCI}
               disabled={buscandoCI}
-              className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl font-bold text-xs shadow-sm flex items-center gap-1.5 self-start"
+              className="px-3.5 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300 rounded-xl font-bold text-xs shadow-sm flex items-center gap-1.5 self-start cursor-pointer"
             >
               <Search size={14} /> {buscandoCI ? 'Buscando...' : 'Autocompletar por CI'}
             </button>
@@ -773,7 +760,7 @@ export function NuevoContrato({ onClose, onSave }) {
               <button
                 type="button"
                 onClick={() => setMultiplicarServiciosAutomatico(!multiplicarServiciosAutomatico)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer ${
                   multiplicarServiciosAutomatico 
                     ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
                     : 'bg-white text-slate-600 border-slate-300'
@@ -787,7 +774,7 @@ export function NuevoContrato({ onClose, onSave }) {
               <button
                 type="button"
                 onClick={() => setModalHabitanteAbierto(true)}
-                className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow flex items-center gap-1.5"
+                className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow flex items-center gap-1.5 cursor-pointer"
               >
                 <UserPlus size={14} /> Agregar Habitante
               </button>
@@ -811,7 +798,7 @@ export function NuevoContrato({ onClose, onSave }) {
                   <button
                     type="button"
                     onClick={() => handleEliminarHabitante(hab.id_temp)}
-                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                   >
                     <Trash2 size={16} />
                   </button>
@@ -889,7 +876,7 @@ export function NuevoContrato({ onClose, onSave }) {
                   <button
                     type="button"
                     onClick={() => handleConceptoToggle(con)}
-                    className="flex items-center gap-3 text-left focus:outline-none"
+                    className="flex items-center gap-3 text-left focus:outline-none cursor-pointer"
                   >
                     {estaSeleccionado ? (
                       <CheckSquare className="text-blue-600 shrink-0" size={20} />
@@ -968,7 +955,7 @@ export function NuevoContrato({ onClose, onSave }) {
           <button
             type="button"
             onClick={calcularVistaPreviaCobros}
-            className="px-5 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow flex items-center gap-2"
+            className="px-5 py-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-xs shadow flex items-center gap-2 cursor-pointer"
           >
             <Eye size={16} /> Generar Vista Previa de Cobros
           </button>
@@ -1011,7 +998,7 @@ export function NuevoContrato({ onClose, onSave }) {
             <button
               type="button"
               onClick={onClose}
-              className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors text-sm"
+              className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors text-sm cursor-pointer"
             >
               Cancelar
             </button>
@@ -1019,7 +1006,7 @@ export function NuevoContrato({ onClose, onSave }) {
           <button
             type="submit"
             disabled={isSubmitting || !mostrarVistaPrevia || departamentosDisponibles.length === 0}
-            className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-600/25 transition-all disabled:opacity-50 flex items-center gap-2 text-sm"
+            className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-600/25 transition-all disabled:opacity-50 flex items-center gap-2 text-sm cursor-pointer"
           >
             {isSubmitting ? (
               <>

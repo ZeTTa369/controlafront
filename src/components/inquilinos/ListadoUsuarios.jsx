@@ -9,12 +9,13 @@ import {
   ShieldCheck, 
   User as UserIcon,
   UserCheck,
-  Loader2 
+  Loader2,
+  KeyRound 
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
+import { listarUsuarios, eliminarUsuario } from '../../services/usuarioService'; // Ajusta según tu nombre de archivo exacto
+import { ModalCambiarPassword } from '../modals/ModalCambiarPassword';
 
-// Datos de prueba iniciales (fallback si la API falla o está vacía)
 const USUARIOS_INICIALES = [
   {
     id_usuario: 1,
@@ -24,7 +25,7 @@ const USUARIOS_INICIALES = [
     ci_nit: '7845123',
     email: 'admin@edificio.com',
     telefono: '+591 71234567',
-    rol: 1, // 1 = Administrador
+    rol: 1,
     estado: 'ACTIVO',
   },
   {
@@ -35,7 +36,7 @@ const USUARIOS_INICIALES = [
     ci_nit: '8521479',
     email: 'ana.rojas@gmail.com',
     telefono: '+591 79865432',
-    rol: 3, // 3 = Inquilino
+    rol: 3,
     estado: 'ACTIVO',
   },
   {
@@ -55,6 +56,7 @@ export function ListadoUsuarios({ onNuevoUsuarioClick, onEditarUsuarioClick }) {
   const [usuarios, setUsuarios] = useState([]);
   const [busqueda, setBusqueda] = useState('');
   const [loading, setLoading] = useState(true);
+  const [usuarioParaResetear, setUsuarioParaResetear] = useState(null);
 
   useEffect(() => {
     cargarUsuarios();
@@ -63,11 +65,7 @@ export function ListadoUsuarios({ onNuevoUsuarioClick, onEditarUsuarioClick }) {
   const cargarUsuarios = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${BASE_URL}/usuarios`, {
-        headers: getAuthHeaders(),
-      });
-      const data = await handleResponse(response);
-
+      const data = await listarUsuarios();
       if (Array.isArray(data) && data.length > 0) {
         setUsuarios(data);
       } else {
@@ -87,34 +85,32 @@ export function ListadoUsuarios({ onNuevoUsuarioClick, onEditarUsuarioClick }) {
     const toastId = toast.loading('Procesando solicitud...');
 
     try {
-      const response = await fetch(`${BASE_URL}/usuarios/${id}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders(),
-      });
-
-      if (!response.ok) throw new Error('Error al eliminar en la API');
-
+      await eliminarUsuario(id);
       toast.success('Usuario desactivado correctamente', { id: toastId });
       setUsuarios(prev => prev.map(u => (u.id_usuario || u.id) === id ? { ...u, estado: 'INACTIVO' } : u));
     } catch (error) {
-      toast.success('Usuario desactivado localmente', { id: toastId });
-      setUsuarios(prev => prev.map(u => (u.id_usuario || u.id) === id ? { ...u, estado: 'INACTIVO' } : u));
+      toast.error(error.message || 'Error al desactivar usuario', { id: toastId });
     }
   };
 
-  // Filtramos por nombre, apellido, CI/NIT o correo
+  // Filtro de búsqueda
   const usuariosFiltrados = usuarios.filter(user => {
-    const term = busqueda.toLowerCase();
+    const term = busqueda.toLowerCase().trim();
     const nombre = (user.nombre || '').toLowerCase();
     const pApellido = (user.primer_apellido || '').toLowerCase();
     const sApellido = (user.segundo_apellido || '').toLowerCase();
     const ci = String(user.ci_nit || '').toLowerCase();
     const email = (user.email || '').toLowerCase();
 
-    return nombre.includes(term) || pApellido.includes(term) || sApellido.includes(term) || ci.includes(term) || email.includes(term);
+    return (
+      nombre.includes(term) || 
+      pApellido.includes(term) || 
+      sApellido.includes(term) || 
+      ci.includes(term) || 
+      email.includes(term)
+    );
   });
 
-  // Estilos visuales para los Roles (1: Admin, 2: Conserje, 3: Inquilino)
   const getRolBadge = (rol) => {
     const rolNum = Number(rol);
     if (rolNum === 1) {
@@ -138,7 +134,6 @@ export function ListadoUsuarios({ onNuevoUsuarioClick, onEditarUsuarioClick }) {
     );
   };
 
-  // Estilos visuales para el Estado
   const getEstadoEstilos = (estado) => {
     const est = (estado || '').toUpperCase();
     switch (est) {
@@ -155,17 +150,16 @@ export function ListadoUsuarios({ onNuevoUsuarioClick, onEditarUsuarioClick }) {
 
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8">
-      
       {/* Cabecera */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h2 className="text-xl font-extrabold text-slate-800">Listado de Usuarios</h2>
-          <p className="text-sm text-slate-500">Administra los inquilinos y personal del sistema.</p>
+          <p className="text-sm text-slate-500">Administra los inquilinos, personal y credenciales del sistema.</p>
         </div>
 
         <button 
           onClick={onNuevoUsuarioClick}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2 active:scale-95"
+          className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2 active:scale-95 cursor-pointer"
         >
           <Users size={18} /> Registrar Usuario
         </button>
@@ -206,7 +200,6 @@ export function ListadoUsuarios({ onNuevoUsuarioClick, onEditarUsuarioClick }) {
                 usuariosFiltrados.map((user) => {
                   const id = user.id_usuario || user.id;
                   const nombreComp = `${user.nombre || ''} ${user.primer_apellido || ''} ${user.segundo_apellido || ''}`.trim();
-                  
                   const iniciales = `${(user.nombre || 'U').charAt(0)}${(user.primer_apellido || '').charAt(0)}`.toUpperCase();
 
                   return (
@@ -249,18 +242,28 @@ export function ListadoUsuarios({ onNuevoUsuarioClick, onEditarUsuarioClick }) {
                       </td>
 
                       <td className="py-4 px-4 text-right">
-                        <div className="flex items-center justify-end gap-2">
+                        <div className="flex items-center justify-end gap-1">
+                          {/* Botón Restablecer Clave (Admin) */}
+                          <button 
+                            onClick={() => setUsuarioParaResetear(user)}
+                            title="Restablecer Contraseña"
+                            className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                          >
+                            <KeyRound size={17} />
+                          </button>
+
                           <button 
                             onClick={() => onEditarUsuarioClick && onEditarUsuarioClick(user)}
-                            title="Editar"
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            title="Editar Datos"
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
                           >
                             <Edit2 size={17} />
                           </button>
+
                           <button 
                             onClick={() => handleDelete(id, nombreComp)}
                             title="Desactivar"
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                           >
                             <Trash2 size={17} />
                           </button>
@@ -281,6 +284,13 @@ export function ListadoUsuarios({ onNuevoUsuarioClick, onEditarUsuarioClick }) {
         )}
       </div>
 
+      {/* Modal de Restablecer Contraseña para Administrador */}
+      {usuarioParaResetear && (
+        <ModalCambiarPassword
+          usuario={usuarioParaResetear}
+          onClose={() => setUsuarioParaResetear(null)}
+        />
+      )}
     </div>
   );
 }

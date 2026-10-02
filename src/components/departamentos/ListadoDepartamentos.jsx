@@ -21,7 +21,8 @@ import {
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
 import { ModalEditarDepartamento } from '../modals/ModalEditarDepartamento';
-import { obtenerFotosDepartamento } from '../../services/departamentoService';
+import { ModalConfirmarEliminar } from '../modals/ModalConfirmarEliminar';
+import { obtenerFotosDepartamento, eliminarDepartamento } from '../../services/departamentoService';
 
 export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
   const [departamentos, setDepartamentos] = useState([]);
@@ -35,8 +36,12 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
 
   // Estados de modales
   const [deptoAEditar, setDeptoAEditar] = useState(null);
-  const [galeriaActiva, setGaleriaActiva] = useState(null); // { depto, fotos: [] }
+  const [galeriaActiva, setGaleriaActiva] = useState(null);
   const [cargandoGaleria, setCargandoGaleria] = useState(false);
+
+  // Estado para eliminación controlada
+  const [deptoAEliminar, setDeptoAEliminar] = useState(null);
+  const [eliminando, setEliminando] = useState(false);
 
   useEffect(() => {
     inicializarDatos();
@@ -87,7 +92,6 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
     setDeptoAEditar(null);
   };
 
-  // Visor de fotos de Cloudinary
   const handleVerGaleria = async (depto) => {
     const idDepto = depto.id_departamento || depto.id;
     setCargandoGaleria(true);
@@ -130,23 +134,30 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
     }
   };
 
-  const handleDelete = async (id, numero) => {
-    if (!window.confirm(`¿Estás seguro de eliminar el departamento ${numero}?`)) return;
+  // Confirmar y procesar la eliminación
+  const confirmarEliminacion = async () => {
+    if (!deptoAEliminar) return;
 
-    const toastId = toast.loading('Eliminando unidad...');
+    const id = deptoAEliminar.id_departamento || deptoAEliminar.id;
+    const numero = deptoAEliminar.numero_departamento || deptoAEliminar.numero || 'N/A';
+
+    setEliminando(true);
+    const toastId = toast.loading(`Eliminando departamento ${numero}...`);
 
     try {
-      const response = await fetch(`${BASE_URL}/departamentos/${id}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders(),
-      });
-
-      if (!response.ok) throw new Error('Error al eliminar en la API');
-
-      toast.success('Departamento eliminado correctamente', { id: toastId });
+      await eliminarDepartamento(id);
+      toast.success(`Departamento ${numero} eliminado correctamente`, { id: toastId });
       setDepartamentos(prev => prev.filter(d => (d.id_departamento || d.id) !== id));
+      setDeptoAEliminar(null);
     } catch (error) {
-      toast.error(error.message || 'Error al eliminar', { id: toastId });
+      console.error('Error al eliminar departamento:', error);
+      // Mensaje claro si la base de datos rechaza por llaves foráneas (contratos activos)
+      const errorMsg = error.message?.includes('foreign key') || error.message?.includes('contrato')
+        ? 'No se puede eliminar: el departamento tiene contratos o registros asociados.'
+        : (error.message || 'Error al eliminar departamento');
+      toast.error(errorMsg, { id: toastId, duration: 4000 });
+    } finally {
+      setEliminando(false);
     }
   };
 
@@ -300,11 +311,10 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                   const nombreEdificio = edificiosMap[depto.id_edificio] || `Edificio #${depto.id_edificio || 1}`;
                   const precio = Number(depto.precio_alquiler || 0);
                   const estadoActual = (depto.estado || 'DISPONIBLE').toUpperCase();
-                  const bloque = depto.bloque || 'FRONTAL';
+                  const bloque = depto.bloque || 'No Definido';
 
                   return (
                     <tr key={id} className="hover:bg-slate-50/80 transition-colors">
-                      {/* Unidad, Piso, Bloque y Botón de Galería */}
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-3">
                           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl shrink-0">
@@ -339,7 +349,6 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                         </div>
                       </td>
 
-                      {/* Edificio */}
                       <td className="py-4 px-4 font-semibold text-slate-700">
                         <div className="flex items-center gap-1.5">
                           <Building2 size={15} className="text-slate-400 shrink-0" />
@@ -347,7 +356,6 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                         </div>
                       </td>
 
-                      {/* Tipo de Inmueble y Ambientes */}
                       <td className="py-4 px-4 text-slate-600">
                         <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-xs font-bold block w-max mb-1">
                           {depto.tipo_inmueble || 'DEPARTAMENTO'}
@@ -363,7 +371,6 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                         </div>
                       </td>
 
-                      {/* Medidores */}
                       <td className="py-4 px-4">
                         <div className="flex flex-col gap-1">
                           {renderMedidor(depto.medidor_agua, 'agua')}
@@ -371,7 +378,6 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                         </div>
                       </td>
 
-                      {/* Switch Rápido de Estado con Nuevos Colores */}
                       <td className="py-4 px-4">
                         <select
                           disabled={actualizandoId === id}
@@ -391,7 +397,6 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                         </select>
                       </td>
 
-                      {/* Precio (Bs en lugar de $) */}
                       <td className="py-4 px-4 font-extrabold text-slate-800">
                         <div className="flex items-center gap-1 text-blue-600">
                           <span className="text-xs font-bold text-blue-500">Bs.</span>
@@ -399,7 +404,6 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                         </div>
                       </td>
 
-                      {/* Acciones */}
                       <td className="py-4 px-4 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button 
@@ -411,9 +415,10 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                             <Edit2 size={17} />
                           </button>
 
+                          {/* Botón que abre el modal de confirmación */}
                           <button 
                             type="button"
-                            onClick={() => handleDelete(id, numero)}
+                            onClick={() => setDeptoAEliminar(depto)}
                             title="Eliminar Departamento"
                             className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                           >
@@ -435,6 +440,18 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
           </table>
         )}
       </div>
+
+      {/* Modal de Confirmación para Eliminar */}
+      {deptoAEliminar && (
+        <ModalConfirmarEliminar
+          isOpen={Boolean(deptoAEliminar)}
+          onClose={() => setDeptoAEliminar(null)}
+          onConfirm={confirmarEliminacion}
+          loading={eliminando}
+          titulo={`¿Eliminar departamento ${deptoAEliminar.numero_departamento || deptoAEliminar.numero}?`}
+          mensaje={`Estás a punto de eliminar el departamento ${deptoAEliminar.numero_departamento || deptoAEliminar.numero} del edificio "${edificiosMap[deptoAEliminar.id_edificio] || 'Edificio'}". Esta acción borrará el registro de la base de datos.`}
+        />
+      )}
 
       {/* Modal de Edición de Departamento */}
       {deptoAEditar && (
