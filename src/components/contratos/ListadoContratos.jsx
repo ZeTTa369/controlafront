@@ -19,6 +19,9 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
+import { listarContratos, eliminarContrato } from '../../services/contratoService';
+import { listarUsuarios } from '../../services/usuarioService';
+import { ModalConfirmarEliminar } from '../modals/ModalConfirmarEliminar';
 
 // Helper para convertir cualquier fecha a formato DD/MM/YYYY
 const formatFechaDMY = (strFecha) => {
@@ -50,6 +53,10 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
   // Modal de Detalle
   const [contratoSeleccionado, setContratoSeleccionado] = useState(null);
 
+  // Modal de Confirmación de Eliminación
+  const [contratoAEliminar, setContratoAEliminar] = useState(null);
+  const [eliminando, setEliminando] = useState(false);
+
   useEffect(() => {
     cargarTodo();
   }, []);
@@ -57,23 +64,18 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
   const cargarTodo = async () => {
     setLoading(true);
     try {
-      const [resContratos, resDeptos, resEdificios, resUsers] = await Promise.all([
-        fetch(`${BASE_URL}/contratos`, { headers: getAuthHeaders() }),
-        fetch(`${BASE_URL}/departamentos`, { headers: getAuthHeaders() }),
-        fetch(`${BASE_URL}/edificios`, { headers: getAuthHeaders() }),
-        fetch(`${BASE_URL}/usuarios`, { headers: getAuthHeaders() }),
+      const [dataContratos, resDeptos, resEdificios, dataUsers] = await Promise.all([
+        listarContratos(),
+        fetch(`${BASE_URL}/departamentos`, { headers: getAuthHeaders() }).then(handleResponse),
+        fetch(`${BASE_URL}/edificios`, { headers: getAuthHeaders() }).then(handleResponse),
+        listarUsuarios(),
       ]);
-
-      const dataContratos = await handleResponse(resContratos);
-      const dataDeptos = await handleResponse(resDeptos);
-      const dataEdificios = await handleResponse(resEdificios);
-      const dataUsers = await handleResponse(resUsers);
 
       // 1. Mapa de Edificios
       const mapEd = {};
       const listEd = [];
-      if (Array.isArray(dataEdificios)) {
-        dataEdificios.forEach(e => {
+      if (Array.isArray(resEdificios)) {
+        resEdificios.forEach(e => {
           const idEd = e.id_edificio || e.id;
           mapEd[idEd] = e.nombre;
           listEd.push({ id: idEd, nombre: e.nombre });
@@ -85,8 +87,8 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
       // 2. Mapa de Departamentos
       const mapDep = {};
       const rawDep = {};
-      if (Array.isArray(dataDeptos)) {
-        dataDeptos.forEach(d => {
+      if (Array.isArray(resDeptos)) {
+        resDeptos.forEach(d => {
           const idDep = d.id_departamento || d.id;
           const edNombre = mapEd[d.id_edificio] || 'Edificio';
           const num = d.numero_departamento || d.numero || 'S/N';
@@ -124,25 +126,26 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm('¿Estás seguro de eliminar o cancelar este contrato?')) return;
+  const confirmarEliminacion = async () => {
+    if (!contratoAEliminar) return;
 
+    const id = contratoAEliminar.id_contrato || contratoAEliminar.id;
+    setEliminando(true);
     const toastId = toast.loading('Eliminando contrato...');
+
     try {
-      const response = await fetch(`${BASE_URL}/contratos/${id}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders(),
-      });
-
-      if (!response.ok) throw new Error('Error en el servidor al eliminar');
-
+      await eliminarContrato(id);
       toast.success('Contrato eliminado exitosamente', { id: toastId });
       setContratos(prev => prev.filter(c => (c.id_contrato || c.id) !== id));
+      
       if (contratoSeleccionado && (contratoSeleccionado.id_contrato || contratoSeleccionado.id) === id) {
         setContratoSeleccionado(null);
       }
+      setContratoAEliminar(null);
     } catch (error) {
       toast.error(error.message || 'Error al eliminar contrato', { id: toastId });
+    } finally {
+      setEliminando(false);
     }
   };
 
@@ -204,7 +207,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
 
         <button 
           onClick={onNuevoContratoClick}
-          className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2 active:scale-95"
+          className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/20 flex items-center gap-2 active:scale-95 cursor-pointer"
         >
           <Plus size={18} /> Registrar Contrato
         </button>
@@ -223,7 +226,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
             className="bg-transparent border-none outline-none ml-2 text-sm text-slate-800 w-full"
           />
           {busqueda && (
-            <button onClick={() => setBusqueda('')} className="text-slate-400 hover:text-slate-600">
+            <button onClick={() => setBusqueda('')} className="text-slate-400 hover:text-slate-600 cursor-pointer">
               <X size={16} />
             </button>
           )}
@@ -332,7 +335,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                           <button 
                             onClick={() => setContratoSeleccionado(contrato)}
                             title="Ver Detalle del Contrato"
-                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors"
+                            className="p-2 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
                           >
                             <Eye size={17} />
                           </button>
@@ -341,16 +344,16 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                           <button 
                             onClick={() => onVerDocumentoClick && onVerDocumentoClick(contrato)}
                             title="Ver Documento Legal"
-                            className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors"
+                            className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors cursor-pointer"
                           >
                             <Printer size={17} />
                           </button>
 
                           {/* BOTÓN 3: ELIMINAR */}
                           <button 
-                            onClick={() => handleDelete(id)}
+                            onClick={() => setContratoAEliminar(contrato)}
                             title="Eliminar Contrato"
-                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors"
+                            className="p-2 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
                           >
                             <Trash2 size={17} />
                           </button>
@@ -392,7 +395,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
 
               <button 
                 onClick={() => setContratoSeleccionado(null)}
-                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors"
+                className="text-slate-400 hover:text-white p-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
               >
                 <X size={20} />
               </button>
@@ -460,7 +463,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                 </div>
               </div>
 
-              {/* 3. Desglose de Condiciones Financieras (Orden Estricto) */}
+              {/* 3. Desglose de Condiciones Financieras */}
               <div className="border border-slate-200 rounded-xl p-4 bg-white">
                 <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-3 flex items-center gap-1.5">
                   <CreditCard size={15} className="text-blue-600" /> Condiciones Financieras y Servicios
@@ -498,7 +501,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
               <button
                 type="button"
                 onClick={() => setContratoSeleccionado(null)}
-                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors uppercase tracking-wider"
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-colors uppercase tracking-wider cursor-pointer"
               >
                 Cerrar
               </button>
@@ -509,7 +512,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                   if (onVerDocumentoClick) onVerDocumentoClick(contratoSeleccionado);
                   setContratoSeleccionado(null);
                 }}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow flex items-center gap-2"
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow flex items-center gap-2 cursor-pointer"
               >
                 <Printer size={15} /> Ver / Imprimir Documento Legal
               </button>
@@ -517,6 +520,18 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
 
           </div>
         </div>
+      )}
+
+      {/* ================= MODAL CONFIRMAR ELIMINACIÓN ================= */}
+      {contratoAEliminar && (
+        <ModalConfirmarEliminar
+          isOpen={Boolean(contratoAEliminar)}
+          onClose={() => setContratoAEliminar(null)}
+          onConfirm={confirmarEliminacion}
+          loading={eliminando}
+          titulo="¿Eliminar o rescindir contrato?"
+          mensaje={`Estás a punto de eliminar el contrato para el inmueble "${deptosMap[contratoAEliminar.id_departamento] || 'Departamento'}" asignado a "${usuariosMap[contratoAEliminar.id_usuario] || 'Inquilino'}". Esta acción afectará el historial de cobros asociados.`}
+        />
       )}
 
     </div>

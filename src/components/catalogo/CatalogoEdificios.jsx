@@ -27,9 +27,8 @@ export const CatalogoEdificios = () => {
   const [departamentos, setDepartamentos] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  // Filtros
+  // Filtro de búsqueda
   const [busqueda, setBusqueda] = useState('');
-  const [filtroCategoria, setFiltroCategoria] = useState('Todos');
 
   // Modal 1: Unidades del edificio seleccionado
   const [edificioSeleccionado, setEdificioSeleccionado] = useState(null);
@@ -96,7 +95,7 @@ export const CatalogoEdificios = () => {
     setFotoActivaIndex((prev) => (prev === fotosDepto.length - 1 ? 0 : prev + 1));
   };
 
-  // Enriquecer cada edificio con sus departamentos disponibles, precio base y url de mapa
+  // Enriquecer cada edificio con métricas y departamentos disponibles
   const edificiosConMetricas = useMemo(() => {
     return edificios.map((ed) => {
       const idEd = ed.id_edificio || ed.id;
@@ -115,14 +114,9 @@ export const CatalogoEdificios = () => {
 
       const precioBase = precios.length > 0 ? Math.min(...precios) : 0;
 
-      const cat = ed.estado === 'Tienda Comercial' || ed.categoria === 'Tienda Comercial'
-        ? 'Tienda Comercial'
-        : 'Vivienda Familiar';
-
       return {
         ...ed,
         idEd,
-        categoriaNormalizada: cat,
         unidadesDisponibles: deptosDisponibles.length,
         deptosDisponiblesList: deptosDisponibles,
         precioBase,
@@ -132,24 +126,18 @@ export const CatalogoEdificios = () => {
     });
   }, [edificios, departamentos]);
 
-  const categoriasPills = ['Todos', 'Vivienda Familiar', 'Tienda Comercial'];
-
   const edificiosFiltrados = useMemo(() => {
     return edificiosConMetricas.filter((ed) => {
       const term = busqueda.toLowerCase().trim();
-      const coincideTexto = 
-        !term || 
+      if (!term) return true;
+
+      return (
         (ed.nombre || '').toLowerCase().includes(term) ||
         (ed.ciudad || '').toLowerCase().includes(term) ||
-        (ed.direccion || '').toLowerCase().includes(term);
-
-      const coincideCat = 
-        filtroCategoria === 'Todos' || 
-        ed.categoriaNormalizada === filtroCategoria;
-
-      return coincideTexto && coincideCat;
+        (ed.direccion || '').toLowerCase().includes(term)
+      );
     });
-  }, [edificiosConMetricas, busqueda, filtroCategoria]);
+  }, [edificiosConMetricas, busqueda]);
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-20">
@@ -170,69 +158,28 @@ export const CatalogoEdificios = () => {
       </nav>
 
       {/* Header Hero */}
-      <header className="relative pt-36 pb-28 px-6 text-center bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 overflow-hidden">
+      <header className="relative pt-36 pb-20 px-6 text-center bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 overflow-hidden">
         <div 
           className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1600596542815-ffad4c1539a9?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80')] bg-cover bg-center opacity-10 mix-blend-overlay"
         />
         
         <div className="relative z-10 max-w-4xl mx-auto">
+          {/* Disponibilidad inmediata con la bandera de Bolivia al final */}
           <span className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-500/20 border border-blue-400/30 text-blue-300 font-extrabold text-xs uppercase tracking-wider mb-6">
-            ✨ Disponibilidad Inmediata en Cochabamba y Tiquipaya
+            ✨ Disponibilidad Inmediata en Cochabamba y Tiquipaya 🇧🇴
           </span>
 
           <h1 className="text-4xl md:text-5xl lg:text-6xl font-black text-white tracking-tight mb-5 leading-tight">
             Departamentos en Alquiler
           </h1>
-          <p className="text-base md:text-lg text-slate-300 mb-10 max-w-2xl mx-auto font-medium">
+          <p className="text-base md:text-lg text-slate-300 max-w-2xl mx-auto font-medium">
             Tu próximo hogar está a un clic. Explora nuestros departamentos listos para habitar
           </p>
-          
-          {/* Buscador */}
-          <div className="flex flex-col sm:flex-row bg-white p-2.5 rounded-2xl sm:rounded-full shadow-2xl max-w-2xl mx-auto gap-3 sm:gap-0 border border-white/10">
-            <div className="flex-1 flex items-center px-4 py-2 sm:py-0">
-              <Search size={22} className="text-slate-400 shrink-0" />
-              <input 
-                type="text" 
-                placeholder="Busca por edificio, calle, zona o municipio..." 
-                className="w-full pl-3 bg-transparent text-slate-900 outline-none text-sm md:text-base font-semibold placeholder:text-slate-400"
-                value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
-              />
-              {busqueda && (
-                <button onClick={() => setBusqueda('')} className="text-slate-400 hover:text-slate-600">
-                  <X size={18} />
-                </button>
-              )}
-            </div>
-            <button 
-              type="button" 
-              className="w-full sm:w-auto bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-xl sm:rounded-full font-black text-sm transition-all shadow-lg shadow-blue-600/30 active:scale-95 cursor-pointer"
-            >
-              Explorar
-            </button>
-          </div>
         </div>
       </header>
 
-      {/* Píldoras de Filtrado */}
-      <div className="flex justify-center flex-wrap gap-2.5 py-8 px-4">
-        {categoriasPills.map((cat) => (
-          <button 
-            key={cat}
-            className={`px-6 py-2 rounded-full text-xs md:text-sm font-extrabold border transition-all duration-200 cursor-pointer ${
-              filtroCategoria === cat 
-                ? 'bg-slate-900 text-white border-slate-900 shadow-md scale-105' 
-                : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300 hover:bg-slate-50'
-            }`}
-            onClick={() => setFiltroCategoria(cat)}
-          >
-            {cat}
-          </button>
-        ))}
-      </div>
-
       {/* Listado de Edificios */}
-      <main className="max-w-7xl mx-auto px-6 lg:px-8">
+      <main className="max-w-7xl mx-auto px-6 lg:px-8 pt-12">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-24 text-slate-400 gap-3">
             <Loader2 size={36} className="animate-spin text-blue-600" />
@@ -260,10 +207,6 @@ export const CatalogoEdificios = () => {
                       ) : (
                         <span className="text-slate-500 font-bold">Ocupado</span>
                       )}
-                    </div>
-
-                    <div className="absolute top-4 right-4 z-10 bg-slate-900/80 backdrop-blur-md text-white text-[11px] font-black px-3 py-1 rounded-lg">
-                      {edificio.categoriaNormalizada}
                     </div>
 
                     <img 
@@ -359,9 +302,37 @@ export const CatalogoEdificios = () => {
           <div className="text-center py-20 px-4 bg-white rounded-3xl border border-slate-200 shadow-sm max-w-xl mx-auto">
             <Building2 size={48} className="text-slate-300 mx-auto mb-3" />
             <h2 className="text-lg font-black text-slate-800 mb-1">No se encontraron edificios</h2>
-            <p className="text-xs text-slate-500">Prueba con otra búsqueda o cambia el filtro de categoría.</p>
+            <p className="text-xs text-slate-500">Prueba ajustando el término de búsqueda.</p>
           </div>
         )}
+
+        {/* Buscador Reubicado en la parte inferior */}
+        <section className="mt-20 pt-12 border-t border-slate-200 max-w-2xl mx-auto text-center">
+          <div className="mb-5">
+            <h3 className="text-lg font-black text-slate-800">¿Buscas una zona o edificio en específico?</h3>
+            <p className="text-xs text-slate-500 font-medium mt-1">Filtra los resultados al instante escribiendo el nombre, calle o municipio.</p>
+          </div>
+
+          <div className="flex items-center bg-white border border-slate-300 focus-within:border-blue-600 focus-within:ring-4 focus-within:ring-blue-100 p-2.5 rounded-2xl shadow-sm transition-all">
+            <Search size={20} className="text-slate-400 shrink-0 ml-2" />
+            <input 
+              type="text" 
+              placeholder="Buscar por edificio, calle, zona o municipio..." 
+              className="w-full px-3 py-1 bg-transparent text-slate-900 outline-none text-sm font-semibold placeholder:text-slate-400"
+              value={busqueda}
+              onChange={(e) => setBusqueda(e.target.value)}
+            />
+            {busqueda && (
+              <button 
+                type="button"
+                onClick={() => setBusqueda('')} 
+                className="text-slate-400 hover:text-slate-600 p-1.5 rounded-lg hover:bg-slate-100 transition-colors cursor-pointer"
+              >
+                <X size={16} />
+              </button>
+            )}
+          </div>
+        </section>
       </main>
 
       {/* ================= MODAL: UNIDADES DISPONIBLES DEL EDIFICIO ================= */}

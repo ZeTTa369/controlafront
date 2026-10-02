@@ -34,6 +34,14 @@ export async function actualizarDepartamento(id, data) {
   return handleResponse(res);
 }
 
+export async function eliminarDepartamento(id) {
+  const res = await fetch(`${API_URL}/${id}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
+  });
+  return handleResponse(res);
+}
+
 // ================= FOTOS DE DEPARTAMENTOS =================
 
 export async function obtenerFotosDepartamento(idDepartamento) {

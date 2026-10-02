@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Building2, MapPin, Edit2, Trash2, Search, Loader2, Plus, Home, Compass } from 'lucide-react';
+import { Building2, MapPin, Edit2, Trash2, Search, Loader2, Plus, Home, Compass, ArrowUpDown } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
 import { ModalEditarEdificio } from '../modals/ModalEditarEdificio';
@@ -9,6 +9,7 @@ export function ListadoEdificios({ onNuevoEdificioClick }) {
   const [busqueda, setBusqueda] = useState('');
   const [loading, setLoading] = useState(true);
   const [edificioAEditar, setEdificioAEditar] = useState(null);
+  const [guardandoOrdenId, setGuardandoOrdenId] = useState(null);
 
   useEffect(() => {
     cargarEdificios();
@@ -33,25 +34,57 @@ export function ListadoEdificios({ onNuevoEdificioClick }) {
   const handleEdicionExitosa = (edificioActualizado) => {
     const idTarget = (edificioActualizado.id_edificio || edificioActualizado.id)?.toString();
 
-    setEdificios((prev) =>
-      prev.map((e) => {
+    setEdificios((prev) => {
+      const actualizados = prev.map((e) => {
         const idActual = (e.id_edificio || e.id)?.toString();
         if (idActual !== idTarget) return e;
 
         return {
           ...e,
           ...edificioActualizado,
-          // Mantener contadores de disponibilidad existentes
           disponibles: e.disponibles,
           ocupados: e.ocupados,
           total_registrados: e.total_registrados,
           capacidad_declarada:
             edificioActualizado.total_departamentos ?? e.capacidad_declarada,
         };
-      })
-    );
+      });
+
+      // Mantener ordenado según 'orden' asc y luego fecha desc
+      return actualizados.sort((a, b) => {
+        const ordenA = Number(a.orden ?? 0);
+        const ordenB = Number(b.orden ?? 0);
+        if (ordenA !== ordenB) return ordenA - ordenB;
+        return new Date(b.created_date || 0) - new Date(a.created_date || 0);
+      });
+    });
 
     setEdificioAEditar(null);
+  };
+
+  // Guardar cambio del número de orden directamente desde la tabla
+  const handleGuardarOrden = async (id, nuevoValor, valorAnterior) => {
+    const valorNumerico = Math.max(0, parseInt(nuevoValor, 10) || 0);
+    if (valorNumerico === valorAnterior) return;
+
+    setGuardandoOrdenId(id);
+    try {
+      const response = await fetch(`${BASE_URL}/edificios/${id}`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ orden: valorNumerico }),
+      });
+
+      const edificioActualizado = await handleResponse(response);
+      toast.success(`Orden actualizado a #${valorNumerico}`, { duration: 1500 });
+      handleEdicionExitosa(edificioActualizado);
+    } catch (error) {
+      console.error('Error actualizando orden:', error);
+      toast.error('No se pudo actualizar el orden');
+      cargarEdificios(); // Revertir a los valores del backend
+    } finally {
+      setGuardandoOrdenId(null);
+    }
   };
 
   const handleDelete = async (id, nombre) => {
@@ -98,7 +131,7 @@ export function ListadoEdificios({ onNuevoEdificioClick }) {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Listado de Edificios</h2>
-          <p className="text-sm text-slate-500">Supervisa las unidades registradas, disponibilidad y ubicación de cada complejo.</p>
+          <p className="text-sm text-slate-500">Supervisa las unidades registradas, define el orden del catálogo y su disponibilidad.</p>
         </div>
 
         <button 
@@ -130,9 +163,14 @@ export function ListadoEdificios({ onNuevoEdificioClick }) {
             <span className="text-sm font-semibold">Cargando complejos residenciales...</span>
           </div>
         ) : (
-          <table className="w-full text-left border-collapse min-w-[750px]">
+          <table className="w-full text-left border-collapse min-w-[780px]">
             <thead>
               <tr className="border-b border-slate-200/80 text-xs font-extrabold text-slate-400 uppercase tracking-wider">
+                <th className="py-4 px-3 w-20 text-center">
+                  <span className="flex items-center justify-center gap-1">
+                    <ArrowUpDown size={13} /> Orden
+                  </span>
+                </th>
                 <th className="py-4 px-4">Edificio</th>
                 <th className="py-4 px-4">Ubicación / Geografía</th>
                 <th className="py-4 px-4">Categoría</th>
@@ -148,9 +186,39 @@ export function ListadoEdificios({ onNuevoEdificioClick }) {
                   const ocupados = edificio.ocupados ?? 0;
                   const registrados = edificio.total_registrados ?? 0;
                   const capacidad = edificio.capacidad_declarada ?? edificio.total_departamentos ?? 0;
+                  const ordenActual = edificio.orden ?? 0;
+                  const guardandoEste = guardandoOrdenId === id;
 
                   return (
                     <tr key={id} className="hover:bg-slate-50/80 transition-colors">
+                      {/* Input Numérico de Orden */}
+                      <td className="py-4 px-3 text-center">
+                        <div className="relative inline-block">
+                          <input
+                            type="number"
+                            min="0"
+                            defaultValue={ordenActual}
+                            key={ordenActual}
+                            disabled={guardandoEste}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') {
+                                e.target.blur();
+                              }
+                            }}
+                            onBlur={(e) => handleGuardarOrden(id, e.target.value, ordenActual)}
+                            className={`w-14 text-center font-extrabold text-xs py-1.5 px-1 border-2 rounded-lg outline-none transition-all ${
+                              guardandoEste
+                                ? 'border-blue-400 bg-blue-50 text-blue-600'
+                                : 'border-slate-200 bg-slate-50 hover:bg-white focus:border-blue-600 focus:bg-white text-slate-800'
+                            }`}
+                            title="Haz clic para modificar la posición en el catálogo"
+                          />
+                          {guardandoEste && (
+                            <Loader2 size={12} className="animate-spin text-blue-600 absolute right-1 top-2.5 pointer-events-none" />
+                          )}
+                        </div>
+                      </td>
+
                       {/* Nombre y Portada */}
                       <td className="py-4 px-4 font-bold text-slate-900">
                         <div className="flex items-center gap-3">
@@ -188,7 +256,7 @@ export function ListadoEdificios({ onNuevoEdificioClick }) {
                       {/* Categoría */}
                       <td className="py-4 px-4">
                         <span className="px-3 py-1 bg-slate-100 text-slate-700 rounded-full text-xs font-bold border border-slate-200/50">
-                          {edificio.estado || 'Lujo'}
+                          {edificio.estado || 'Vivienda Familiar'}
                         </span>
                       </td>
 
@@ -234,7 +302,7 @@ export function ListadoEdificios({ onNuevoEdificioClick }) {
                 })
               ) : (
                 <tr>
-                  <td colSpan="5" className="text-center py-12 text-slate-400">
+                  <td colSpan="6" className="text-center py-12 text-slate-400">
                     No se encontraron edificios que coincidan con la búsqueda.
                   </td>
                 </tr>

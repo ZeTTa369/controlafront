@@ -122,10 +122,13 @@ export function ModalNuevoHabitante({ isOpen, onClose, onAgregar }) {
                 onChange={(e) => setNuevoHabitante({ ...nuevoHabitante, parentesco: e.target.value })}
                 className="w-full py-2.5 px-3 border border-slate-300 rounded-xl text-sm font-semibold outline-none focus:border-blue-600 bg-white"
               >
-                <option value="Hijo/a">Hijo/a</option>
+                <option value="Hijo(a)">Hijo(a)</option>
                 <option value="Cónyuge / Pareja">Cónyuge / Pareja</option>
-                <option value="Familiar">Familiar</option>
-                <option value="Compañero/a">Compañero/a</option>
+                <option value="Padre / Madre">Padre / Madre</option>
+                <option value="Hermano(a)">Hermano(a)</option>
+                <option value="Sobrino(a)">Sobrino(a)</option>
+                <option value="Tío(a)">Tío(a)</option>
+                <option value="Familiar">Otro Familiar</option>
                 <option value="Otro">Otro dependiente</option>
               </select>
             </div>
