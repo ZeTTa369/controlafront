@@ -600,6 +600,9 @@ export function NuevoContrato({ onClose, onSave }) {
         conceptosDetalle: conceptosDetalle,
       };
 
+      const dataContrato = await crearContrato(payloadContrato);
+      const nuevoIdContrato = dataContrato.id_contrato || dataContrato.id;
+
       // 3. Registrar censo completo en la tabla habitantes (Titular + Dependientes)
       if (nuevoIdContrato) {
         const listaCenso = [];
