@@ -3,26 +3,31 @@ import {
   Home, 
   Hash, 
   Layers, 
-  DollarSign, 
   BedDouble, 
   Bath, 
   Edit2, 
   Trash2, 
   Search, 
-  Building2,
-  Loader2,
-  Droplets,
-  Zap,
-  Compass,
-  Filter,
-  X,
-  Camera
+  Building2, 
+  Loader2, 
+  Droplets, 
+  Zap, 
+  Compass, 
+  Filter, 
+  X, 
+  Camera, 
+  Key 
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
-import { ModalEditarDepartamento } from '../modals/ModalEditarDepartamento';
+import { 
+  listarDepartamentos, 
+  actualizarDepartamento, 
+  eliminarDepartamento, 
+  obtenerFotosDepartamento 
+} from '../../services/departamentoService';
+import { listarEdificios } from '../../services/edificioService';
+import { NuevoDepartamento } from './NuevoDepartamento';
 import { ModalConfirmarEliminar } from '../modals/ModalConfirmarEliminar';
-import { obtenerFotosDepartamento, eliminarDepartamento } from '../../services/departamentoService';
 
 export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
   const [departamentos, setDepartamentos] = useState([]);
@@ -34,12 +39,12 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
   const [loading, setLoading] = useState(true);
   const [actualizandoId, setActualizandoId] = useState(null);
 
-  // Estados de modales
+  // Estados para modal de edicion y visor de fotografias
   const [deptoAEditar, setDeptoAEditar] = useState(null);
   const [galeriaActiva, setGaleriaActiva] = useState(null);
   const [cargandoGaleria, setCargandoGaleria] = useState(false);
 
-  // Estado para eliminación controlada
+  // Estados para modal de eliminacion controlada
   const [deptoAEliminar, setDeptoAEliminar] = useState(null);
   const [eliminando, setEliminando] = useState(false);
 
@@ -47,16 +52,14 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
     inicializarDatos();
   }, []);
 
+  // Carga inicial mediante servicios centralizados
   const inicializarDatos = async () => {
     setLoading(true);
     try {
-      const [resEdificios, resDeptos] = await Promise.all([
-        fetch(`${BASE_URL}/edificios`, { headers: getAuthHeaders() }),
-        fetch(`${BASE_URL}/departamentos`, { headers: getAuthHeaders() })
+      const [dataEdificios, dataDeptos] = await Promise.all([
+        listarEdificios(),
+        listarDepartamentos()
       ]);
-
-      const dataEdificios = await handleResponse(resEdificios);
-      const dataDeptos = await handleResponse(resDeptos);
 
       if (Array.isArray(dataEdificios)) {
         const mapa = {};
@@ -81,6 +84,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
     }
   };
 
+  // Actualizacion optimista del estado local tras edicion exitosa
   const handleEdicionExitosa = (deptoActualizado) => {
     const idTarget = deptoActualizado.id_departamento || deptoActualizado.id;
     setDepartamentos((prev) =>
@@ -92,6 +96,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
     setDeptoAEditar(null);
   };
 
+  // Apertura y consulta de galeria de fotos de Cloudinary
   const handleVerGaleria = async (depto) => {
     const idDepto = depto.id_departamento || depto.id;
     setCargandoGaleria(true);
@@ -101,25 +106,20 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
       const fotos = await obtenerFotosDepartamento(idDepto);
       setGaleriaActiva({ depto, fotos: Array.isArray(fotos) ? fotos : [] });
     } catch (error) {
-      toast.error('No se pudieron obtener las fotografías del departamento');
+      toast.error('No se pudieron obtener las fotografias del departamento');
       setGaleriaActiva(null);
     } finally {
       setCargandoGaleria(false);
     }
   };
 
+  // Cambio rapido de estado de disponibilidad mediante servicio
   const handleCambiarEstado = async (id, nuevoEstado) => {
     setActualizandoId(id);
     const toastId = toast.loading('Actualizando estado...');
 
     try {
-      const response = await fetch(`${BASE_URL}/departamentos/${id}`, {
-        method: 'PATCH',
-        headers: getAuthHeaders(),
-        body: JSON.stringify({ estado: nuevoEstado }),
-      });
-
-      if (!response.ok) throw new Error('Error al actualizar en el servidor');
+      await actualizarDepartamento(id, { estado: nuevoEstado });
 
       setDepartamentos(prev => prev.map(d => {
         const dId = d.id_departamento || d.id;
@@ -134,7 +134,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
     }
   };
 
-  // Confirmar y procesar la eliminación
+  // Confirmacion y ejecucion de eliminacion fisica
   const confirmarEliminacion = async () => {
     if (!deptoAEliminar) return;
 
@@ -151,7 +151,6 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
       setDeptoAEliminar(null);
     } catch (error) {
       console.error('Error al eliminar departamento:', error);
-      // Mensaje claro si la base de datos rechaza por llaves foráneas (contratos activos)
       const errorMsg = error.message?.includes('foreign key') || error.message?.includes('contrato')
         ? 'No se puede eliminar: el departamento tiene contratos o registros asociados.'
         : (error.message || 'Error al eliminar departamento');
@@ -161,6 +160,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
     }
   };
 
+  // Filtrado reactivo en memoria
   const departamentosFiltrados = useMemo(() => {
     return departamentos.filter((depto) => {
       const term = busqueda.toLowerCase().trim();
@@ -191,6 +191,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
     });
   }, [departamentos, busqueda, filtroEdificio, filtroEstado, edificiosMap]);
 
+  // Renderizado visual de indicadores de medidor
   const renderMedidor = (valor, tipo) => {
     const v = (valor || 'NO_TIENE').toUpperCase();
     const esAgua = tipo === 'agua';
@@ -221,11 +222,11 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
   return (
     <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6 md:p-8 animate-fade-in relative">
       
-      {/* Cabecera */}
+      {/* Cabecera del modulo */}
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h2 className="text-xl font-extrabold text-slate-800">Listado de Unidades / Departamentos</h2>
-          <p className="text-sm text-slate-500">Supervisa la disponibilidad, medidores, galería y características de cada inmueble.</p>
+          <p className="text-sm text-slate-500">Supervisa la disponibilidad, llaves, medidores, galeria y caracteristicas de cada inmueble.</p>
         </div>
 
         <button 
@@ -236,13 +237,13 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
         </button>
       </div>
 
-      {/* Barra de Filtros */}
+      {/* Barra de filtros */}
       <div className="grid grid-cols-1 sm:grid-cols-4 gap-4 mb-6">
         <div className="sm:col-span-2 flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition-all">
           <Search size={18} className="text-slate-400 shrink-0" />
           <input 
             type="text" 
-            placeholder="Buscar por número, bloque, tipo u observaciones..." 
+            placeholder="Buscar por numero, bloque, tipo u observaciones..." 
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             className="bg-transparent border-none outline-none ml-2 text-sm text-slate-800 w-full"
@@ -291,12 +292,13 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
             <span className="text-sm font-semibold">Cargando departamentos...</span>
           </div>
         ) : (
-          <table className="w-full text-left border-collapse min-w-[850px]">
+          <table className="w-full text-left border-collapse min-w-[950px]">
             <thead>
               <tr className="border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
                 <th className="py-4 px-4">Unidad / Bloque</th>
                 <th className="py-4 px-4">Edificio</th>
                 <th className="py-4 px-4">Tipo / Ambiente</th>
+                <th className="py-4 px-4 text-center">Llaves</th>
                 <th className="py-4 px-4">Medidores</th>
                 <th className="py-4 px-4">Estado / Disponibilidad</th>
                 <th className="py-4 px-4">Precio Sugerido</th>
@@ -312,9 +314,11 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                   const precio = Number(depto.precio_alquiler || 0);
                   const estadoActual = (depto.estado || 'DISPONIBLE').toUpperCase();
                   const bloque = depto.bloque || 'No Definido';
+                  const llavesCount = Number(depto.numero_llaves !== null && depto.numero_llaves !== undefined ? depto.numero_llaves : 1);
 
                   return (
                     <tr key={id} className="hover:bg-slate-50/80 transition-colors">
+                      {/* Unidad, Piso, Bloque y Boton de Galeria */}
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-3">
                           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl shrink-0">
@@ -326,7 +330,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                               <button
                                 type="button"
                                 onClick={() => handleVerGaleria(depto)}
-                                title="Ver fotografías de la unidad"
+                                title="Ver fotografias de la unidad"
                                 className="p-1 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors cursor-pointer"
                               >
                                 <Camera size={14} />
@@ -349,6 +353,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                         </div>
                       </td>
 
+                      {/* Nombre del Edificio */}
                       <td className="py-4 px-4 font-semibold text-slate-700">
                         <div className="flex items-center gap-1.5">
                           <Building2 size={15} className="text-slate-400 shrink-0" />
@@ -356,6 +361,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                         </div>
                       </td>
 
+                      {/* Tipo de Inmueble, Habitaciones y Banos */}
                       <td className="py-4 px-4 text-slate-600">
                         <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md text-xs font-bold block w-max mb-1">
                           {depto.tipo_inmueble || 'DEPARTAMENTO'}
@@ -366,11 +372,20 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                           </span>
                           <span>•</span>
                           <span className="flex items-center gap-1">
-                            <Bath size={13} className="text-slate-400" /> {depto.banos || 1} bñ.
+                            <Bath size={13} className="text-slate-400" /> {depto.banos || 1} bn.
                           </span>
                         </div>
                       </td>
 
+                      {/* Columna Independiente: Numero de Llaves */}
+                      <td className="py-4 px-4 text-center">
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-amber-50 text-amber-800 border border-amber-200/80 rounded-lg text-xs font-extrabold" title="Cantidad de llaves registradas">
+                          <Key size={13} className="text-amber-600" />
+                          {llavesCount} {llavesCount === 1 ? 'llave' : 'llaves'}
+                        </span>
+                      </td>
+
+                      {/* Medidores de Servicios */}
                       <td className="py-4 px-4">
                         <div className="flex flex-col gap-1">
                           {renderMedidor(depto.medidor_agua, 'agua')}
@@ -378,6 +393,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                         </div>
                       </td>
 
+                      {/* Selector de Estado */}
                       <td className="py-4 px-4">
                         <select
                           disabled={actualizandoId === id}
@@ -391,12 +407,13 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                               : 'bg-yellow-50 text-yellow-700 border-yellow-300 hover:bg-yellow-100'
                           } disabled:opacity-50`}
                         >
-                          <option value="DISPONIBLE">● DISPONIBLE</option>
-                          <option value="OCUPADO">● OCUPADO</option>
-                          <option value="MANTENIMIENTO">● MANTENIMIENTO</option>
+                          <option value="DISPONIBLE">DISPONIBLE</option>
+                          <option value="OCUPADO">OCUPADO</option>
+                          <option value="MANTENIMIENTO">MANTENIMIENTO</option>
                         </select>
                       </td>
 
+                      {/* Precio */}
                       <td className="py-4 px-4 font-extrabold text-slate-800">
                         <div className="flex items-center gap-1 text-blue-600">
                           <span className="text-xs font-bold text-blue-500">Bs.</span>
@@ -404,6 +421,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                         </div>
                       </td>
 
+                      {/* Acciones */}
                       <td className="py-4 px-4 text-right">
                         <div className="flex items-center justify-end gap-1">
                           <button 
@@ -415,7 +433,6 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                             <Edit2 size={17} />
                           </button>
 
-                          {/* Botón que abre el modal de confirmación */}
                           <button 
                             type="button"
                             onClick={() => setDeptoAEliminar(depto)}
@@ -431,7 +448,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                 })
               ) : (
                 <tr>
-                  <td colSpan="7" className="text-center py-12 text-slate-400">
+                  <td colSpan="8" className="text-center py-12 text-slate-400">
                     No se encontraron departamentos registrados.
                   </td>
                 </tr>
@@ -441,35 +458,39 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
         )}
       </div>
 
-      {/* Modal de Confirmación para Eliminar */}
+      {/* Modal de Confirmacion para Eliminar */}
       {deptoAEliminar && (
         <ModalConfirmarEliminar
           isOpen={Boolean(deptoAEliminar)}
           onClose={() => setDeptoAEliminar(null)}
           onConfirm={confirmarEliminacion}
           loading={eliminando}
-          titulo={`¿Eliminar departamento ${deptoAEliminar.numero_departamento || deptoAEliminar.numero}?`}
-          mensaje={`Estás a punto de eliminar el departamento ${deptoAEliminar.numero_departamento || deptoAEliminar.numero} del edificio "${edificiosMap[deptoAEliminar.id_edificio] || 'Edificio'}". Esta acción borrará el registro de la base de datos.`}
+          titulo={`Eliminar departamento ${deptoAEliminar.numero_departamento || deptoAEliminar.numero}?`}
+          mensaje={`Estas a punto de eliminar el departamento ${deptoAEliminar.numero_departamento || deptoAEliminar.numero} del edificio "${edificiosMap[deptoAEliminar.id_edificio] || 'Edificio'}". Esta accion borrara el registro de la base de datos.`}
         />
       )}
 
-      {/* Modal de Edición de Departamento */}
+      {/* Modal de Edicion Unificado utilizando NuevoDepartamento */}
       {deptoAEditar && (
-        <ModalEditarDepartamento
-          departamento={deptoAEditar}
-          onClose={() => setDeptoAEditar(null)}
-          onSuccess={handleEdicionExitosa}
-        />
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm overflow-y-auto">
+          <div className="w-full max-w-2xl my-8">
+            <NuevoDepartamento
+              departamentoAEditar={deptoAEditar}
+              onClose={() => setDeptoAEditar(null)}
+              onSave={handleEdicionExitosa}
+            />
+          </div>
+        </div>
       )}
 
-      {/* Modal de Visor de Galería Rápida */}
+      {/* Modal Visor de Galeria Rapida */}
       {galeriaActiva && (
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 overflow-hidden w-full max-w-2xl flex flex-col animate-scale-up">
             <div className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-base">
-                  Fotografías: Unidad {galeriaActiva.depto.numero_departamento || galeriaActiva.depto.numero}
+                  Fotografias: Unidad {galeriaActiva.depto.numero_departamento || galeriaActiva.depto.numero}
                 </h3>
                 <p className="text-xs text-slate-400">
                   {edificiosMap[galeriaActiva.depto.id_edificio] || 'Edificio'}
@@ -488,7 +509,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
               {cargandoGaleria ? (
                 <div className="flex flex-col items-center justify-center py-12 text-slate-400 gap-2">
                   <Loader2 size={24} className="animate-spin text-blue-600" />
-                  <span className="text-xs">Cargando fotografías...</span>
+                  <span className="text-xs">Cargando fotografias...</span>
                 </div>
               ) : galeriaActiva.fotos.length > 0 ? (
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -510,7 +531,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                 </div>
               ) : (
                 <div className="text-center py-12 text-slate-400">
-                  <p className="text-sm">Esta unidad aún no tiene fotos registradas.</p>
+                  <p className="text-sm">Esta unidad aun no tiene fotos registradas.</p>
                   <button
                     type="button"
                     onClick={() => {

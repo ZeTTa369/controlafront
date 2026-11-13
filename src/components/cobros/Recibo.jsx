@@ -1,6 +1,6 @@
 import { X, Printer } from "lucide-react";
 
-// Helper para convertir números a palabras en español (Bolivianos)
+// Helper para convertir numeros a palabras en espanol (Bolivianos)
 function numeroALetras(monto) {
   const unidades = [
     "",
@@ -111,27 +111,41 @@ function formatCorto(fechaStr) {
   return `${dia}/${mes}/${anio}`;
 }
 
-// Fecha larga para el pie central
-function formatFechaLarga(fecha = new Date()) {
+// Fecha larga para el pie central respetando YYYY-MM-DD local
+function formatFechaLarga(fechaInput) {
+  let fechaObj = new Date();
+  if (fechaInput) {
+    if (typeof fechaInput === "string") {
+      const limpia = fechaInput.split("T")[0];
+      const partes = limpia.split("-").map(Number);
+      if (partes.length === 3 && !isNaN(partes[0])) {
+        fechaObj = new Date(partes[0], partes[1] - 1, partes[2]);
+      }
+    } else if (fechaInput instanceof Date && !isNaN(fechaInput.getTime())) {
+      fechaObj = fechaInput;
+    }
+  }
+
   const opciones = {
     weekday: "long",
     day: "2-digit",
     month: "long",
     year: "numeric",
   };
-  return new Intl.DateTimeFormat("es-BO", opciones).format(fecha);
+  return new Intl.DateTimeFormat("es-BO", opciones).format(fechaObj);
 }
 
 export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
   if (!reciboData) return null;
 
-  const { contrato = {}, grupo = {} } = reciboData;
+  const { contrato = {}, grupo = {}, fechaEmision } = reciboData;
 
-  // 1. Año Cabecera sincronizado con el período del cobro
-  const anioPeriodo = grupo.anio || grupo.items?.[0]?.periodo_anio || 2026;
+  // 1. Anio Cabecera sincronizado con la fecha elegida o el periodo del cobro
+  const anioFechaManual = fechaEmision ? Number(String(fechaEmision).split("-")[0]) : null;
+  const anioPeriodo = anioFechaManual || grupo.anio || grupo.items?.[0]?.periodo_anio || 2026;
   const mesNumero = grupo.mes || grupo.items?.[0]?.periodo_mes || 7;
 
-  // 2. Número correlativo formateado a 5 dígitos
+  // 2. Numero correlativo formateado a 5 digitos
   const idRaw =
     grupo.idRecibo || grupo.items?.[0]?.id_cobro || contrato.idContrato || 130;
   const nroRecibo = String(idRaw).padStart(5, "0");
@@ -158,7 +172,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
     grupo.nombrePeriodo || `JULIO ${anioPeriodo}`
   ).toUpperCase();
 
-  // 6. Construcción dinámica del concepto con soporte para ajustes / excepciones
+  // 6. Construccion dinamica del concepto con soporte para ajustes / excepciones
   const items = Array.isArray(grupo.items) ? grupo.items : [];
 
   const itemAgua = items.find((it) =>
@@ -210,9 +224,9 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
 
   const textoConcepto = `PAGO DEP ${numDepto} DEL ${fDesde} AL ${fHasta}${textoServicios} (${nombrePeriodo})`;
 
-  // 7. Dirección completa del edificio
+  // 7. Direccion completa del edificio
   const direccionEdificio =
-    contrato.direccion_edificio || contrato.edificio || "Dirección Principal";
+    contrato.direccion_edificio || contrato.edificio || "Direccion Principal";
 
   return (
     <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
@@ -231,20 +245,20 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
           </button>
         </div>
 
-        {/* Talonario / Recibo Físico */}
+        {/* Talonario / Recibo Fisico */}
         <div className="p-8 overflow-y-auto flex-1 bg-slate-50 print:bg-white print:p-0 print:overflow-visible flex items-center justify-center">
           <div className="w-full max-w-xl bg-white border-2 border-[#1a365d] rounded-[24px] p-7 shadow-sm text-slate-900 font-sans print:border-2 print:border-black print:rounded-2xl print:shadow-none">
-            {/* Título Superior */}
+            {/* Titulo Superior */}
             <h1 className="text-center font-black text-2xl tracking-wider text-[#102a45] uppercase mb-4">
               RECIBO DE PAGO/{anioPeriodo}
             </h1>
 
-            {/* Cabecera: Dirección vs Nro y Monto */}
+            {/* Cabecera: Direccion vs Nro y Monto */}
             <div className="grid grid-cols-12 gap-3 items-start pb-5">
-              {/* Dirección */}
+              {/* Direccion */}
               <div className="col-span-7 text-[11px] leading-tight text-slate-800 font-bold space-y-0.5">
                 <p>
-                  <span className="font-black text-[#102a45]">Dirección: </span>
+                  <span className="font-black text-[#102a45]">Direccion: </span>
                   {direccionEdificio}
                 </p>
                 <p className="font-bold text-[#102a45] pt-0.5">
@@ -252,7 +266,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
                 </p>
               </div>
 
-              {/* Recuadro de Recibo Nº y Monto */}
+              {/* Recuadro de Recibo Nro y Monto */}
               <div className="col-span-5 flex flex-col items-end">
                 <div className="w-full border-2 border-slate-900 rounded-sm divide-y-2 divide-slate-900 overflow-hidden text-center bg-white">
                   {/* Fila Nro Recibo */}
@@ -282,12 +296,12 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
               </div>
             </div>
 
-            {/* Recuadro Central con etiquetas alineadas y contenido centrado */}
+            {/* Recuadro Central */}
             <div className="border-2 border-slate-900 rounded-lg p-4 space-y-4 mb-5 text-[11px] bg-white">
-              {/* Recibí del Sr.(a) */}
+              {/* Recibi del Sr.(a) */}
               <div className="flex items-end">
                 <span className="font-black text-[#102a45] whitespace-nowrap tracking-wide text-[10px] w-36 shrink-0">
-                  RECIBÍ DEL SR.(A):
+                  RECIBI DEL SR.(A):
                 </span>
                 <div className="flex-1 border-b border-dotted border-slate-700 pb-0.5 text-center">
                   <span className="font-black text-slate-900 uppercase text-[11px] block">
@@ -308,7 +322,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
                 </div>
               </div>
 
-              {/* Por Concepto de (con texto completo centrado y renglón dotted de apoyo) */}
+              {/* Por Concepto de */}
               <div className="space-y-1.5">
                 <div className="flex items-end">
                   <span className="font-black text-[#102a45] whitespace-nowrap tracking-wide text-[10px] w-36 shrink-0">
@@ -320,19 +334,18 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
                     </span>
                   </div>
                 </div>
-                {/* Renglón punteado complementario estilo talonario */}
                 <div className="w-full border-b border-dotted border-slate-700 h-2"></div>
               </div>
             </div>
 
-            {/* Fecha en formato largo centrada */}
+            {/* Fecha en formato largo centrada (usa la fecha manual seleccionada) */}
             <div className="text-center font-black text-xs text-slate-900 capitalize my-4">
-              {formatFechaLarga(new Date())}
+              {formatFechaLarga(fechaEmision || new Date())}
             </div>
 
-            {/* Sección Inferior: Código de barras y Firmas */}
+            {/* Seccion Inferior: Codigo de barras y Firmas */}
             <div className="grid grid-cols-12 gap-2 items-end pt-3">
-              {/* Código de barras simulado */}
+              {/* Codigo de barras simulado */}
               <div className="col-span-3 text-left">
                 <div className="font-mono text-[9px] text-slate-400 tracking-widest select-none opacity-70">
                   |||||| |||| ||| |||||||
@@ -342,7 +355,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
                 </div>
               </div>
 
-              {/* Firma Recibí Conforme */}
+              {/* Firma Recibi Conforme */}
               <div className="col-span-4 text-center">
                 <div className="h-12 flex items-end justify-center mb-1">
                   <svg
@@ -353,22 +366,18 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
-                    {/* Trazo curvo principal y bucle de la 'L' */}
                     <path
                       d="M 45 42 C 60 48 76 43 90 28 C 105 13 118 20 102 46 C 82 78 52 110 18 126 C 8 130 5 118 16 112 C 34 102 70 105 105 116 C 132 124 165 125 210 119"
                       strokeWidth="3.2"
                     />
-                    {/* Detalle del bucle de la 'C' */}
                     <path
                       d="M 125 58 C 110 52 94 65 92 84 C 90 102 108 114 125 104 C 133 98 138 90 142 81"
                       strokeWidth="3"
                     />
-                    {/* Estructura y caída de la 'A' */}
                     <path
                       d="M 160 52 C 150 63 138 88 152 97 C 163 103 173 90 177 75 C 180 62 178 55 174 53 C 168 50 157 78 168 95 C 173 102 188 95 204 88 C 218 82 232 80 242 81"
                       strokeWidth="3"
                     />
-                    {/* Punto caligráfico final */}
                     <circle
                       cx="225"
                       cy="116"
@@ -380,14 +389,14 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
                 </div>
                 <div className="border-t-2 border-slate-900 pt-1">
                   <span className="font-black text-[9px] uppercase tracking-wider text-slate-900 block">
-                    RECIBÍ CONFORME
+                    RECIBI CONFORME
                   </span>
                 </div>
               </div>
 
               <div className="col-span-1"></div>
 
-              {/* Firma Entregué Conforme */}
+              {/* Firma Entregue Conforme */}
               <div className="col-span-4 text-center">
                 <div className="h-10 flex items-end justify-center mb-1">
                   <svg
@@ -404,7 +413,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
                 </div>
                 <div className="border-t-2 border-slate-900 pt-1">
                   <span className="font-black text-[9px] uppercase tracking-wider text-slate-900 block">
-                    ENTREGUÉ CONFORME
+                    ENTREGUE CONFORME
                   </span>
                 </div>
               </div>
@@ -412,7 +421,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
           </div>
         </div>
 
-        {/* Botones de Acción en Pantalla */}
+        {/* Botones de Accion en Pantalla */}
         <div className="bg-slate-100 px-6 py-3.5 border-t border-slate-200 flex justify-end gap-3 print:hidden">
           <button
             type="button"

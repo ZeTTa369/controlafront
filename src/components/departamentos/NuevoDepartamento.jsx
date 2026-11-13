@@ -5,7 +5,6 @@ import {
   Layers,
   BedDouble,
   Bath,
-  DollarSign,
   Building2,
   Info,
   X,
@@ -16,14 +15,18 @@ import {
   UploadCloud,
   Trash2,
   Loader2,
+  Key,
 } from "lucide-react";
 import toast from "react-hot-toast";
-import { BASE_URL, getAuthHeaders, handleResponse } from "../../api/config";
 import {
+  crearDepartamento,
+  actualizarDepartamento,
   subirFotosDepartamento,
   obtenerFotosDepartamento,
   eliminarFotoDepartamento,
 } from "../../services/departamentoService";
+import { listarEdificios } from "../../services/edificioService";
+import { ModalConfirmarEliminar } from "../modals/ModalConfirmarEliminar";
 
 export function NuevoDepartamento({
   onClose,
@@ -33,34 +36,47 @@ export function NuevoDepartamento({
   const [edificios, setEdificios] = useState([]);
   const [loadingEdificios, setLoadingEdificios] = useState(true);
 
+  // Estado del formulario
   const [formData, setFormData] = useState({
     edificioId: "",
     piso: "",
     numero: "",
-    bloque: "", // Opción vacía por defecto
-    medidor_agua: "COMPARTIDO", // Medidor de agua compartido por defecto
+    bloque: "",
+    medidor_agua: "COMPARTIDO",
     medidor_luz: "INDEPENDIENTE",
     tipoDepartamento: "DEPARTAMENTO",
     habitaciones: "1",
     banos: "1",
+    numero_llaves: "1",
     precioMensual: "",
     observaciones: "",
   });
 
-  // Estados de imágenes
+  // Estados de carga de imagenes
   const [archivosFotos, setArchivosFotos] = useState([]);
   const [previewsLocales, setPreviewsLocales] = useState([]);
   const [fotosGuardadas, setFotosGuardadas] = useState([]);
   const [cargandoFotos, setCargandoFotos] = useState(false);
 
+  // Modal para confirmacion de eliminacion de foto
+  const [fotoAEliminarId, setFotoAEliminarId] = useState(null);
+  const [eliminandoFoto, setEliminandoFoto] = useState(false);
+
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // 1. Cargar edificios dinámicamente desde la API
+  // Carga inicial de edificios
   useEffect(() => {
     cargarEdificios();
   }, []);
 
-  // 2. Precarga en modo edición
+  // Limpieza de URLs creadas en memoria para evitar fugas de recursos
+  useEffect(() => {
+    return () => {
+      previewsLocales.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [previewsLocales]);
+
+  // Precarga de valores cuando se entra en modo edicion
   useEffect(() => {
     if (departamentoAEditar) {
       const idDepto =
@@ -85,6 +101,7 @@ export function NuevoDepartamento({
           "DEPARTAMENTO",
         habitaciones: String(departamentoAEditar.habitaciones ?? 1),
         banos: String(departamentoAEditar.banos ?? 1),
+        numero_llaves: String(departamentoAEditar.numero_llaves ?? 1),
         precioMensual: String(
           departamentoAEditar.precio_alquiler ||
             departamentoAEditar.precioMensual ||
@@ -113,10 +130,7 @@ export function NuevoDepartamento({
 
   const cargarEdificios = async () => {
     try {
-      const response = await fetch(`${BASE_URL}/edificios`, {
-        headers: getAuthHeaders(),
-      });
-      const data = await handleResponse(response);
+      const data = await listarEdificios();
       setEdificios(data || []);
 
       if (Array.isArray(data) && data.length > 0 && !departamentoAEditar) {
@@ -127,6 +141,7 @@ export function NuevoDepartamento({
       }
     } catch (error) {
       console.error("Error al cargar la lista de edificios:", error);
+      toast.error("No se pudieron cargar los edificios");
     } finally {
       setLoadingEdificios(false);
     }
@@ -140,7 +155,7 @@ export function NuevoDepartamento({
     }));
   };
 
-  // Manejo de fotos múltiples
+  // Manejo de seleccion de archivos locales
   const handleFotosChange = (e) => {
     const files = Array.from(e.target.files || []);
     if (!files.length) return;
@@ -151,28 +166,36 @@ export function NuevoDepartamento({
     setPreviewsLocales((prev) => [...prev, ...nuevasPreviews]);
   };
 
+  // Remover foto del buffer local antes de subirla
   const quitarFotoLocal = (index) => {
     URL.revokeObjectURL(previewsLocales[index]);
     setArchivosFotos((prev) => prev.filter((_, i) => i !== index));
     setPreviewsLocales((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const handleEliminarFotoGuardada = async (idFoto) => {
-    if (!window.confirm("¿Seguro que deseas eliminar esta fotografía?")) return;
-    const toastId = toast.loading("Eliminando fotografía...");
+  // Confirmar eliminacion de foto almacenada
+  const confirmarEliminarFoto = async () => {
+    if (!fotoAEliminarId) return;
+
+    setEliminandoFoto(true);
+    const toastId = toast.loading("Eliminando fotografia...");
     try {
-      await eliminarFotoDepartamento(idFoto);
+      await eliminarFotoDepartamento(fotoAEliminarId);
       setFotosGuardadas((prev) =>
-        prev.filter((f) => f.id_departamento_foto !== idFoto),
+        prev.filter((f) => f.id_departamento_foto !== fotoAEliminarId),
       );
-      toast.success("Foto eliminada", { id: toastId });
+      toast.success("Fotografia eliminada correctamente", { id: toastId });
+      setFotoAEliminarId(null);
     } catch (err) {
-      toast.error(err.message || "Error al eliminar fotografía", {
+      toast.error(err.message || "Error al eliminar fotografia", {
         id: toastId,
       });
+    } finally {
+      setEliminandoFoto(false);
     }
   };
 
+  // Envio de datos principales y subida de archivos
   const handleSubmit = async (e) => {
     e.preventDefault();
     setIsSubmitting(true);
@@ -183,39 +206,38 @@ export function NuevoDepartamento({
       isEdit ? "Actualizando unidad..." : "Guardando unidad...",
     );
 
-    const url = isEdit
-      ? `${BASE_URL}/departamentos/${id}`
-      : `${BASE_URL}/departamentos`;
-    const method = isEdit ? "PATCH" : "POST";
-
+    // Mapeo del payload incluyendo el numero de llaves
     const payload = {
       id_edificio: Number(formData.edificioId),
       piso: Number(formData.piso) || 1,
       numero_departamento: String(formData.numero).trim(),
-      bloque: formData.bloque ? formData.bloque : null, // Bloque opcional
+      bloque: formData.bloque ? formData.bloque : null,
       medidor_agua: formData.medidor_agua,
       medidor_luz: formData.medidor_luz,
       tipo_inmueble: formData.tipoDepartamento,
       habitaciones: Number(formData.habitaciones),
       banos: Number(formData.banos),
+      numero_llaves: Number(formData.numero_llaves) || 1,
       precio_alquiler: Number(formData.precioMensual),
       observaciones: formData.observaciones?.trim() || null,
     };
 
     try {
-      const response = await fetch(url, {
-        method,
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payload),
-      });
+      let deptoGuardado;
 
-      const deptoGuardado = await handleResponse(response);
+      // Persistencia mediante la capa de servicio centralizada
+      if (isEdit) {
+        deptoGuardado = await actualizarDepartamento(id, payload);
+      } else {
+        deptoGuardado = await crearDepartamento(payload);
+      }
+
       const idDeptoDestino =
         id || deptoGuardado.id_departamento || deptoGuardado.id;
 
-      // Si se seleccionaron fotos, subirlas en lote a Cloudinary
+      // Carga multipart de fotografias si el usuario selecciono archivos
       if (archivosFotos.length > 0 && idDeptoDestino) {
-        toast.loading("Subiendo fotografías a Cloudinary...", { id: toastId });
+        toast.loading("Subiendo fotografias a la nube...", { id: toastId });
         const formDataFotos = new FormData();
         archivosFotos.forEach((file) => {
           formDataFotos.append("fotos", file);
@@ -225,7 +247,7 @@ export function NuevoDepartamento({
       }
 
       toast.success(
-        isEdit ? "¡Departamento actualizado!" : "¡Departamento registrado!",
+        isEdit ? "Departamento actualizado correctamente" : "Departamento registrado exitosamente",
         { id: toastId },
       );
 
@@ -242,7 +264,7 @@ export function NuevoDepartamento({
 
   return (
     <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden max-w-2xl mx-auto relative animate-fade-in">
-      {/* Cabecera */}
+      {/* Cabecera del modal */}
       <div className="bg-slate-900 px-8 py-6 text-white flex items-center justify-between">
         <div className="flex items-center gap-3">
           <div className="p-2.5 bg-blue-600 rounded-xl text-white">
@@ -255,7 +277,7 @@ export function NuevoDepartamento({
                 : "Registrar Nueva Unidad / Departamento"}
             </h2>
             <p className="text-sm text-slate-400">
-              Ubicación, bloque, fotos, medidores y tipo de inmueble
+              Ubicacion, bloque, fotos, llaves y medidores de servicio
             </p>
           </div>
         </div>
@@ -271,9 +293,9 @@ export function NuevoDepartamento({
         )}
       </div>
 
-      {/* Formulario */}
+      {/* Formulario principal */}
       <form onSubmit={handleSubmit} className="p-8 space-y-6">
-        {/* Selección del Edificio */}
+        {/* Seleccion de Edificio */}
         <div>
           <label className="block text-sm font-bold text-slate-700 mb-2">
             Edificio / Condominio *
@@ -308,7 +330,7 @@ export function NuevoDepartamento({
           </div>
         </div>
 
-        {/* Fila: Piso, Número y Bloque (Opcional con opción vacía) */}
+        {/* Piso, Numero y Bloque */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">
@@ -353,7 +375,6 @@ export function NuevoDepartamento({
             </div>
           </div>
 
-          {/* Bloque Opcional: Exterior, Interior y Vacío */}
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">
               Bloque{" "}
@@ -380,13 +401,12 @@ export function NuevoDepartamento({
           </div>
         </div>
 
-        {/* Sección: Configuración de Medidores */}
+        {/* Configuracion de Medidores */}
         <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl">
           <label className="block text-xs font-bold uppercase tracking-wider text-slate-500 mb-3">
-            Configuración de Servicios y Medidores
+            Configuracion de Servicios y Medidores
           </label>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Medidor de Agua: COMPARTIDO por defecto */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                 <Droplets size={15} className="text-blue-500" /> Medidor de Agua
@@ -397,15 +417,12 @@ export function NuevoDepartamento({
                 onChange={handleChange}
                 className="w-full py-2.5 px-3 border-2 border-slate-200 rounded-xl text-sm font-semibold bg-white outline-none focus:border-blue-600 cursor-pointer"
               >
-                <option value="COMPARTIDO">
-                  Medidor Compartido (Por defecto)
-                </option>
+                <option value="COMPARTIDO">Medidor Compartido (Por defecto)</option>
                 <option value="INDEPENDIENTE">Medidor Independiente</option>
                 <option value="NO_TIENE">No tiene medidor</option>
               </select>
             </div>
 
-            {/* Medidor de Luz: Sin opción "No tiene medidor" */}
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5 flex items-center gap-1.5">
                 <Zap size={15} className="text-amber-500" /> Medidor de Luz
@@ -423,7 +440,7 @@ export function NuevoDepartamento({
           </div>
         </div>
 
-        {/* Fila: Tipo de Inmueble y Precio */}
+        {/* Tipo de Inmueble y Precio Sugerido */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">
@@ -444,7 +461,7 @@ export function NuevoDepartamento({
                 <option value="MONOAMBIENTE">Monoambiente</option>
                 <option value="GARZONIER">Garzonier</option>
                 <option value="DEPARTAMENTO">Departamento</option>
-                <option value="GALERIA_TIENDA">Galería - Tienda</option>
+                <option value="GALERIA_TIENDA">Galeria - Tienda</option>
               </select>
             </div>
           </div>
@@ -471,8 +488,8 @@ export function NuevoDepartamento({
           </div>
         </div>
 
-        {/* Fila: Habitaciones y Baños */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* Distribucion interna: Habitaciones, Baños y Llaves */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">
               Habitaciones
@@ -489,14 +506,14 @@ export function NuevoDepartamento({
                 required
                 value={formData.habitaciones}
                 onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white"
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-medium"
               />
             </div>
           </div>
 
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">
-              Baños
+              Banos
             </label>
             <div className="relative flex items-center group">
               <Bath
@@ -511,31 +528,53 @@ export function NuevoDepartamento({
                 required
                 value={formData.banos}
                 onChange={handleChange}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white"
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-medium"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-2">
+              Nº de Llaves *
+            </label>
+            <div className="relative flex items-center group">
+              <Key
+                size={18}
+                className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors"
+              />
+              <input
+                type="number"
+                name="numero_llaves"
+                min="0"
+                required
+                placeholder="Ej. 2"
+                value={formData.numero_llaves}
+                onChange={handleChange}
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-bold"
               />
             </div>
           </div>
         </div>
 
-        {/* ================= FOTOS DEL DEPARTAMENTO ================= */}
+        {/* Modulo de Fotografias */}
         <div className="p-5 bg-slate-50 border border-slate-200 rounded-2xl space-y-4">
           <div className="flex items-center justify-between">
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-500">
-              Fotografías del Departamento
+              Fotografias del Departamento
             </label>
             <span className="text-xs text-slate-400">
-              Cloudinary (JPG, PNG, WEBP)
+              Almacenamiento Cloudinary (JPG, PNG, WEBP)
             </span>
           </div>
 
-          {/* Selector Drag & Drop */}
+          {/* Area para soltar o seleccionar archivos */}
           <label className="border-2 border-dashed border-slate-300 hover:border-blue-500 bg-white hover:bg-blue-50/40 transition-all rounded-xl p-5 flex flex-col items-center justify-center cursor-pointer">
             <UploadCloud size={30} className="text-slate-400 mb-1.5" />
             <span className="text-xs font-bold text-slate-700">
               Haz clic para seleccionar fotos
             </span>
             <span className="text-[11px] text-slate-400 mt-0.5">
-              Puedes elegir varias imágenes a la vez
+              Puedes seleccionar varias imagenes a la vez
             </span>
             <input
               type="file"
@@ -546,11 +585,11 @@ export function NuevoDepartamento({
             />
           </label>
 
-          {/* Previews de fotos nuevas por subir */}
+          {/* Previsualizacion de nuevas fotografias seleccionadas */}
           {previewsLocales.length > 0 && (
             <div>
               <span className="text-[11px] font-bold text-blue-600 uppercase tracking-wider block mb-2">
-                Nuevas fotos seleccionadas ({previewsLocales.length})
+                Nuevas fotos por subir ({previewsLocales.length})
               </span>
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
                 {previewsLocales.map((url, idx) => (
@@ -567,7 +606,7 @@ export function NuevoDepartamento({
                       type="button"
                       onClick={() => quitarFotoLocal(idx)}
                       className="absolute top-1.5 right-1.5 bg-slate-900/80 hover:bg-red-600 text-white p-1 rounded-full transition-colors cursor-pointer"
-                      title="Quitar selección"
+                      title="Quitar seleccion"
                     >
                       <X size={13} />
                     </button>
@@ -577,16 +616,16 @@ export function NuevoDepartamento({
             </div>
           )}
 
-          {/* Fotos ya guardadas en el backend (Modo Edición) */}
+          {/* Galeria de fotos guardadas previamente (Modo Edicion) */}
           {cargandoFotos ? (
             <div className="flex items-center gap-2 text-xs text-slate-400 py-2">
-              <Loader2 size={14} className="animate-spin text-blue-600" />{" "}
-              Cargando fotos guardadas...
+              <Loader2 size={14} className="animate-spin text-blue-600" />
+              Cargando fotografias del servidor...
             </div>
           ) : fotosGuardadas.length > 0 ? (
             <div className="pt-3 border-t border-slate-200">
               <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block mb-2">
-                Fotos Guardadas ({fotosGuardadas.length})
+                Fotos Guardadas en el Sistema ({fotosGuardadas.length})
               </span>
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
                 {fotosGuardadas.map((f) => (
@@ -601,11 +640,9 @@ export function NuevoDepartamento({
                     />
                     <button
                       type="button"
-                      onClick={() =>
-                        handleEliminarFotoGuardada(f.id_departamento_foto)
-                      }
+                      onClick={() => setFotoAEliminarId(f.id_departamento_foto)}
                       className="absolute top-1.5 right-1.5 bg-red-600 hover:bg-red-700 text-white p-1.5 rounded-full opacity-90 transition-all cursor-pointer shadow-md"
-                      title="Eliminar de Cloudinary / Base de Datos"
+                      title="Eliminar fotografia definitivamente"
                     >
                       <Trash2 size={13} />
                     </button>
@@ -616,7 +653,7 @@ export function NuevoDepartamento({
           ) : null}
         </div>
 
-        {/* Observaciones */}
+        {/* Observaciones Generales */}
         <div>
           <label className="block text-sm font-bold text-slate-700 mb-2">
             Observaciones (Opcional)
@@ -637,7 +674,7 @@ export function NuevoDepartamento({
           </div>
         </div>
 
-        {/* Botones de Acción */}
+        {/* Botones de Accion */}
         <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
           {onClose && (
             <button
@@ -665,6 +702,18 @@ export function NuevoDepartamento({
           </button>
         </div>
       </form>
+
+      {/* Modal de confirmacion para eliminar fotografias guardadas */}
+      {fotoAEliminarId && (
+        <ModalConfirmarEliminar
+          isOpen={Boolean(fotoAEliminarId)}
+          onClose={() => setFotoAEliminarId(null)}
+          onConfirm={confirmarEliminarFoto}
+          loading={eliminandoFoto}
+          titulo="¿Eliminar fotografia?"
+          mensaje="Esta accion eliminara la imagen del servidor Cloudinary y de la base de datos de forma permanente."
+        />
+      )}
     </div>
   );
 }

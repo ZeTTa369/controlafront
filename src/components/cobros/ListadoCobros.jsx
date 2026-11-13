@@ -8,18 +8,21 @@ import {
   X, 
   Home, 
   Building2, 
-  ArrowUpRight,
-  Wallet,
-  Clock,
-  Printer,
-  Lock,
-  CreditCard,
-  Sliders,
-  Sparkles,
-  Info
+  ArrowUpRight, 
+  Wallet, 
+  Clock, 
+  Printer, 
+  Lock, 
+  CreditCard, 
+  Sliders, 
+  FileX2, 
+  AlertTriangle 
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
+import { listarCobros, pagarCobro } from '../../services/cobroPagoService';
+import { listarContratos, finalizarContrato } from '../../services/contratoService';
+import { listarUsuarios } from '../../services/usuarioService';
 import { Recibo } from './Recibo';
 
 const MESES = [
@@ -27,6 +30,7 @@ const MESES = [
   'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
 ];
 
+// Formateo seguro de fecha a formato DD/MM/YYYY
 const formatFechaDMY = (strFecha) => {
   if (!strFecha) return 'N/A';
   try {
@@ -39,6 +43,15 @@ const formatFechaDMY = (strFecha) => {
   }
 };
 
+// Obtener fecha local actual en formato YYYY-MM-DD
+const getHoyLocalISO = () => {
+  const hoy = new Date();
+  const y = hoy.getFullYear();
+  const m = String(hoy.getMonth() + 1).padStart(2, '0');
+  const d = String(hoy.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
 export function ListadoCobros() {
   const [loading, setLoading] = useState(true);
   const [cobros, setCobros] = useState([]);
@@ -49,82 +62,94 @@ export function ListadoCobros() {
   const [usuariosMap, setUsuariosMap] = useState({});
   const [edificiosMap, setEdificiosMap] = useState({});
 
-  // Filtros
+  // Estados de filtrado
   const [busqueda, setBusqueda] = useState('');
   const [filtroEdificio, setFiltroEdificio] = useState('');
   const [tabEstado, setTabEstado] = useState('TODOS');
 
-  // Modal Principal: Contrato Activo
+  // Modal principal: Contrato activo en visualizacion
   const [contratoActivoId, setContratoActivoId] = useState(null);
 
-  // Submodal: Cobro Individual y Ajuste de Excepción
+  // Fecha manual para emision de recibos
+  const [fechaReciboManual, setFechaReciboManual] = useState(getHoyLocalISO());
+
+  // Submodal: Finalizar contrato anticipadamente
+  const [modalFinalizarAbierto, setModalFinalizarAbierto] = useState(false);
+  const [fechaFinalizacion, setFechaFinalizacion] = useState(getHoyLocalISO());
+  const [finalizandoContrato, setFinalizandoContrato] = useState(false);
+
+  // Submodal: Cobro individual y ajuste de excepcion
   const [cobroAPagar, setCobroAPagar] = useState(null);
   const [submittingPago, setSubmittingPago] = useState(false);
   
-  // Estado del formulario de pago + Ajustes
+  // Estado del formulario de pago y configuracion de ajustes
   const [formPago, setFormPago] = useState({
     monto: '',
     metodo_pago: 'EFECTIVO',
     comprobante: '',
     aplicarAjuste: false,
-    tipoAjuste: 'DIAS', // 'DIAS' | 'PERSONAS' | 'MANUAL'
+    tipoAjuste: 'DIAS',
     diasPresentes: 15,
     personasAjustadas: 1,
     montoAjustadoManual: '',
     motivoAjuste: ''
   });
 
-  // Modal Recibo
+  // Estado para impresion de recibo
   const [reciboData, setReciboData] = useState(null);
 
   useEffect(() => {
     cargarDatos();
   }, []);
 
+  // Carga inicial de datos mediante servicios y catalogos
   const cargarDatos = async () => {
     setLoading(true);
     try {
-      const [resCobros, resConceptos, resContratos, resDeptos, resEdificios, resUsers] = await Promise.all([
-        fetch(`${BASE_URL}/cobros`, { headers: getAuthHeaders() }),
-        fetch(`${BASE_URL}/conceptos`, { headers: getAuthHeaders() }).catch(() => null),
-        fetch(`${BASE_URL}/contratos`, { headers: getAuthHeaders() }).catch(() => null),
-        fetch(`${BASE_URL}/departamentos`, { headers: getAuthHeaders() }).catch(() => null),
-        fetch(`${BASE_URL}/edificios`, { headers: getAuthHeaders() }).catch(() => null),
-        fetch(`${BASE_URL}/usuarios`, { headers: getAuthHeaders() }).catch(() => null),
+      const [
+        dataCobros, 
+        dataContratos, 
+        dataUsers, 
+        resConceptos, 
+        resDeptos, 
+        resEdificios
+      ] = await Promise.all([
+        listarCobros(),
+        listarContratos().catch(() => []),
+        listarUsuarios().catch(() => []),
+        fetch(`${BASE_URL}/conceptos`, { headers: getAuthHeaders() }).then(handleResponse).catch(() => []),
+        fetch(`${BASE_URL}/departamentos`, { headers: getAuthHeaders() }).then(handleResponse).catch(() => []),
+        fetch(`${BASE_URL}/edificios`, { headers: getAuthHeaders() }).then(handleResponse).catch(() => []),
       ]);
 
-      const dataCobros = await handleResponse(resCobros);
-      const dataConc = resConceptos && resConceptos.ok ? await handleResponse(resConceptos) : [];
-      const dataContratos = resContratos && resContratos.ok ? await handleResponse(resContratos) : [];
-      const dataDeptos = resDeptos && resDeptos.ok ? await handleResponse(resDeptos) : [];
-      const dataEdificios = resEdificios && resEdificios.ok ? await handleResponse(resEdificios) : [];
-      const dataUsers = resUsers && resUsers.ok ? await handleResponse(resUsers) : [];
-
+      // Mapeo de conceptos
       const mapC = {};
-      if (Array.isArray(dataConc)) {
-        dataConc.forEach(c => { mapC[c.id_concepto || c.id] = c.nombre; });
+      if (Array.isArray(resConceptos)) {
+        resConceptos.forEach(c => { mapC[c.id_concepto || c.id] = c.nombre; });
       }
       setConceptosMap(mapC);
 
+      // Mapeo de edificios
       const mapEd = {};
-      if (Array.isArray(dataEdificios)) {
-        dataEdificios.forEach(e => { 
+      if (Array.isArray(resEdificios)) {
+        resEdificios.forEach(e => { 
           const id = e.id_edificio || e.id;
           mapEd[id] = {
             id,
             nombre: e.nombre || 'Edificio',
-            direccion: e.direccion || 'Dirección no especificada',
+            direccion: e.direccion || 'Direccion no especificada',
             ciudad: e.ciudad || 'Cochabamba',
             provincia: e.provincia || 'Cercado'
           }; 
         });
       }
-      setEdificios(Array.isArray(dataEdificios) ? dataEdificios : []);
+      setEdificios(Array.isArray(resEdificios) ? resEdificios : []);
       setEdificiosMap(mapEd);
 
+      // Mapeo de departamentos
       const mapDep = {};
-      if (Array.isArray(dataDeptos)) {
-        dataDeptos.forEach(d => {
+      if (Array.isArray(resDeptos)) {
+        resDeptos.forEach(d => {
           mapDep[d.id_departamento || d.id] = {
             id_edificio: d.id_edificio,
             numero: d.numero_departamento || d.numero || 'S/N',
@@ -136,6 +161,7 @@ export function ListadoCobros() {
       }
       setDepartamentosMap(mapDep);
 
+      // Mapeo de usuarios
       const mapUsr = {};
       if (Array.isArray(dataUsers)) {
         dataUsers.forEach(u => {
@@ -155,9 +181,9 @@ export function ListadoCobros() {
     }
   };
 
-  // Cálculo de contratos activos
+  // Calculo consolidado por tarjeta de contrato
   const tarjetasContratos = useMemo(() => {
-    const hoyStr = new Date().toISOString().split('T')[0];
+    const hoyStr = getHoyLocalISO();
 
     return contratos.map(con => {
       const idContrato = con.id_contrato || con.id;
@@ -167,6 +193,7 @@ export function ListadoCobros() {
       const nombreEdificio = edInfo.nombre || 'Edificio';
       const direccionEdificio = edInfo.direccion || con.direccion || '';
       const nombreInquilino = usuariosMap[con.id_usuario] || 'Inquilino';
+      const estadoContrato = (con.estado || 'ACTIVO').toUpperCase();
 
       const cobrosContrato = cobros.filter(c => Number(c.id_contrato) === Number(idContrato));
 
@@ -205,6 +232,8 @@ export function ListadoCobros() {
       return {
         idContrato,
         contratoOriginal: con,
+        estadoContrato,
+        fechaFinContrato: con.fecha_fin ? String(con.fecha_fin).split('T')[0] : null,
         inquilino: nombreInquilino,
         idEdificio,
         edificio: nombreEdificio,
@@ -213,7 +242,7 @@ export function ListadoCobros() {
         deptoPiso: depto.piso || 1,
         deptoBloque: depto.bloque || '',
         personas: con.personas || con.cantidad_personas || con.cantidadPersonas || 1,
-        montoAlquiler: Number(con.monto_alquiler || con.precio_alquiler || 0),
+        montoAlquiler: Number(con.monto_renta || con.monto_alquiler || con.precio_alquiler || 0),
         moneda: con.moneda || 'BOB',
         totalDeuda,
         totalPagado,
@@ -229,7 +258,7 @@ export function ListadoCobros() {
     return tarjetasContratos.find(c => Number(c.idContrato) === Number(contratoActivoId)) || null;
   }, [contratoActivoId, tarjetasContratos]);
 
-  // Agrupación mensual con orden cronológico
+  // Agrupacion cronologica por periodo de mes y anio
   const gruposMensualesContrato = useMemo(() => {
     if (!contratoActivoId) return [];
     const cobrosDelContrato = cobros.filter(c => Number(c.id_contrato) === Number(contratoActivoId));
@@ -246,7 +275,7 @@ export function ListadoCobros() {
           mes,
           anio,
           nombrePeriodo: `${MESES[mes] || 'Mes'} ${anio}`,
-          fechaPago: cobro.fecha_pago || cobro.updatedAt || cobro.fecha_vencimiento,
+          fechaPago: cobro.fecha_pago || cobro.updated_date || cobro.fecha_vencimiento,
           fechaInicio: cobro.fecha_inicio,
           fechaFin: cobro.fecha_fin,
           idRecibo: cobro.id_cobro || cobro.id,
@@ -280,7 +309,31 @@ export function ListadoCobros() {
       .sort((a, b) => a.clave.localeCompare(b.clave));
   }, [contratoActivoId, cobros]);
 
-  // Abrir Modal de Pago con estado inicial
+  // Procesar finalizacion anticipada del contrato
+  const handleConfirmarFinalizacion = async (e) => {
+    e.preventDefault();
+    if (!contratoActivo || !fechaFinalizacion) {
+      toast.error('Selecciona la fecha de conclusion del contrato');
+      return;
+    }
+
+    setFinalizandoContrato(true);
+    const toastId = toast.loading('Finalizando contrato y ajustando cartera de cobros...');
+
+    try {
+      await finalizarContrato(contratoActivo.idContrato, fechaFinalizacion);
+      toast.success('Contrato finalizado y cuotas futuras depuradas', { id: toastId });
+      setModalFinalizarAbierto(false);
+      await cargarDatos();
+    } catch (error) {
+      console.error('Error al finalizar contrato:', error);
+      toast.error(error.message || 'No se pudo finalizar el contrato', { id: toastId });
+    } finally {
+      setFinalizandoContrato(false);
+    }
+  };
+
+  // Inicializacion del modal de pago individual
   const abrirFormPago = (cobro) => {
     const esPagado = (cobro.estado || '').toUpperCase() === 'PAGADO';
     const saldo = esPagado ? 0 : Number(cobro.saldo_pendiente ?? cobro.monto ?? 0);
@@ -300,7 +353,7 @@ export function ListadoCobros() {
     });
   };
 
-  // Recalcular el monto automáticamente según el tipo de ajuste
+  // Recalculo dinamico de montos basado en la excepcion
   const recalcularMontoAjuste = (tipo, valor) => {
     if (!cobroAPagar) return;
     const montoBase = Number(cobroAPagar.monto || 0);
@@ -324,7 +377,7 @@ export function ListadoCobros() {
     }));
   };
 
-  // Envío del pago + Excepción
+  // Envio del pago y persistencia del ajuste
   const handleConfirmarPago = async (e) => {
     e.preventDefault();
     if (!cobroAPagar) return;
@@ -332,53 +385,54 @@ export function ListadoCobros() {
     const idTarget = cobroAPagar.id_cobro || cobroAPagar.id;
     const montoPagado = Number(formPago.monto);
 
+    if (isNaN(montoPagado) || montoPagado <= 0) {
+      toast.error('El monto debe ser un numero mayor a 0');
+      return;
+    }
+
     if (formPago.aplicarAjuste && !formPago.motivoAjuste.trim()) {
-      toast.error('Por favor escribe el motivo del ajuste o excepción.');
+      toast.error('Especifica el motivo del ajuste o excepcion');
       return;
     }
 
     setSubmittingPago(true);
-    const toastId = toast.loading('Procesando cobro y excepción...');
+    const toastId = toast.loading('Procesando cobro y actualizando saldo...');
 
     try {
       const payload = {
         monto: montoPagado,
         metodo_pago: formPago.metodo_pago,
-        comprobante: formPago.comprobante || null,
+        comprobante: formPago.comprobante ? formPago.comprobante.trim() : null,
         ...(formPago.aplicarAjuste ? {
           nuevo_monto: montoPagado,
           motivo_ajuste: formPago.motivoAjuste.trim()
         } : {})
       };
 
-      const response = await fetch(`${BASE_URL}/cobros/${idTarget}/pagar`, {
-        method: 'POST',
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payload),
-      });
+      const respuesta = await pagarCobro(idTarget, payload);
+      const cobroActualizadoServidor = respuesta?.cobro;
 
-      const dataRespuesta = await handleResponse(response);
-
-      // Actualizar inmediatamente la lista de cobros en memoria
       setCobros(prevCobros => prevCobros.map(c => {
         if (Number(c.id_cobro || c.id) !== Number(idTarget)) return c;
 
-        // Si se aplicó un ajuste, el monto total del cobro se ajusta exactamente al nuevo monto
-        const nuevoMontoDefinitivo = formPago.aplicarAjuste ? montoPagado : Number(c.monto);
-        
-        // Si se aplicó ajuste, el saldo queda en 0 y el cobro queda totalmente pagado
-        const nuevoSaldo = formPago.aplicarAjuste 
-          ? 0 
-          : Math.max(0, (c.saldo_pendiente !== undefined && c.saldo_pendiente !== null ? Number(c.saldo_pendiente) : nuevoMontoDefinitivo) - montoPagado);
+        if (cobroActualizadoServidor) {
+          return {
+            ...c,
+            ...cobroActualizadoServidor
+          };
+        }
 
-        const nuevoEstado = nuevoSaldo === 0 ? 'PAGADO' : 'PENDIENTE';
+        const montoBase = formPago.aplicarAjuste ? montoPagado : Number(c.monto);
+        const saldoAnterior = c.saldo_pendiente !== undefined && c.saldo_pendiente !== null 
+          ? Number(c.saldo_pendiente) 
+          : montoBase;
+        const saldoCalculado = formPago.aplicarAjuste ? 0 : Math.max(0, saldoAnterior - montoPagado);
 
         return {
           ...c,
-          ...(dataRespuesta?.cobro || {}),
-          monto: nuevoMontoDefinitivo,
-          saldo_pendiente: nuevoSaldo,
-          estado: nuevoEstado,
+          monto: montoBase,
+          saldo_pendiente: saldoCalculado,
+          estado: saldoCalculado === 0 ? 'PAGADO' : 'PENDIENTE',
           ...(formPago.aplicarAjuste ? {
             motivo_ajuste: formPago.motivoAjuste.trim(),
             monto_original: c.monto_original || c.monto
@@ -386,10 +440,11 @@ export function ListadoCobros() {
         };
       }));
 
-      toast.success('¡Cobro y ajuste registrados exitosamente!', { id: toastId });
+      toast.success('Cobro registrado exitosamente', { id: toastId });
       setCobroAPagar(null);
     } catch (error) {
-      toast.error(error.message || 'Error al procesar cobro', { id: toastId });
+      console.error('Error registrando pago:', error);
+      toast.error(error.message || 'Error al procesar el cobro', { id: toastId });
     } finally {
       setSubmittingPago(false);
     }
@@ -431,11 +486,11 @@ export function ListadoCobros() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h2 className="text-xl font-extrabold text-slate-800">Cartera de Cobros y Expensas</h2>
-          <p className="text-sm text-slate-500">Supervisa inquilinos, cobra cuotas y emite comprobantes oficiales al completar el período.</p>
+          <p className="text-sm text-slate-500">Supervisa inquilinos, cobra cuotas, finaliza contratos y emite comprobantes oficiales.</p>
         </div>
       </div>
 
-      {/* Métricas */}
+      {/* Metricas de resumen */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
         <div className="p-4 bg-slate-50 border border-slate-200/80 rounded-2xl">
           <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block">Total Contratos</span>
@@ -443,7 +498,7 @@ export function ListadoCobros() {
         </div>
 
         <div className="p-4 bg-emerald-50/60 border border-emerald-200 rounded-2xl">
-          <span className="text-xs font-bold text-emerald-700 uppercase tracking-wider block">Al Día</span>
+          <span className="text-xs font-bold text-emerald-700 uppercase tracking-wider block">Al Dia</span>
           <p className="text-2xl font-black text-emerald-700 mt-1">{stats.alDia}</p>
         </div>
 
@@ -465,13 +520,13 @@ export function ListadoCobros() {
             <Search size={18} className="text-slate-400 shrink-0" />
             <input 
               type="text" 
-              placeholder="Buscar por inquilino, edificio o número de depto..." 
+              placeholder="Buscar por inquilino, edificio o numero de depto..." 
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
               className="bg-transparent border-none outline-none ml-2 text-sm text-slate-800 w-full placeholder:text-slate-400"
             />
             {busqueda && (
-              <button onClick={() => setBusqueda('')} className="text-slate-400 hover:text-slate-600">
+              <button onClick={() => setBusqueda('')} className="text-slate-400 hover:text-slate-600 cursor-pointer">
                 <X size={16} />
               </button>
             )}
@@ -520,12 +575,12 @@ export function ListadoCobros() {
               tabEstado === 'AL_DIA' ? 'bg-emerald-600 text-white shadow-sm' : 'text-slate-500 hover:text-emerald-600'
             }`}
           >
-            Al Día ({stats.alDia})
+            Al Dia ({stats.alDia})
           </button>
         </div>
       </div>
 
-      {/* Tarjetas de Contratos */}
+      {/* Cuadricula de tarjetas */}
       {loading ? (
         <div className="flex flex-col items-center justify-center py-20 text-slate-400 gap-3">
           <Loader2 size={32} className="animate-spin text-blue-600" />
@@ -536,11 +591,15 @@ export function ListadoCobros() {
           {tarjetasFiltradas.map(card => {
             const esMora = card.estadoSemaforo === 'MORA';
             const esAlDia = card.estadoSemaforo === 'AL_DIA';
+            const esFinalizado = card.estadoContrato === 'FINALIZADO';
 
             return (
               <div
                 key={card.idContrato}
-                onClick={() => setContratoActivoId(card.idContrato)}
+                onClick={() => {
+                  setContratoActivoId(card.idContrato);
+                  setFechaReciboManual(getHoyLocalISO());
+                }}
                 className={`border rounded-2xl p-5 cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 bg-white relative flex flex-col justify-between ${
                   esMora 
                     ? 'border-red-200 hover:border-red-400' 
@@ -551,18 +610,26 @@ export function ListadoCobros() {
               >
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-3">
-                    <span className={`px-2.5 py-1 text-xs font-extrabold rounded-lg border flex items-center gap-1.5 ${
-                      esMora 
-                        ? 'bg-red-50 text-red-700 border-red-200' 
-                        : esAlDia 
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                        : 'bg-amber-50 text-amber-700 border-amber-200'
-                    }`}>
-                      <span className={`w-2 h-2 rounded-full ${
-                        esMora ? 'bg-red-600 animate-pulse' : esAlDia ? 'bg-emerald-500' : 'bg-amber-500'
-                      }`} />
-                      {esMora ? 'En Mora' : esAlDia ? 'Al Día' : 'Pendiente'}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`px-2.5 py-1 text-xs font-extrabold rounded-lg border flex items-center gap-1.5 ${
+                        esMora 
+                          ? 'bg-red-50 text-red-700 border-red-200' 
+                          : esAlDia 
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                          : 'bg-amber-50 text-amber-700 border-amber-200'
+                      }`}>
+                        <span className={`w-2 h-2 rounded-full ${
+                          esMora ? 'bg-red-600 animate-pulse' : esAlDia ? 'bg-emerald-500' : 'bg-amber-500'
+                        }`} />
+                        {esMora ? 'En Mora' : esAlDia ? 'Al Dia' : 'Pendiente'}
+                      </span>
+
+                      {esFinalizado && (
+                        <span className="px-2 py-1 text-[10px] font-extrabold rounded-lg bg-slate-800 text-white uppercase">
+                          Finalizado
+                        </span>
+                      )}
+                    </div>
 
                     <span className="text-xs font-extrabold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100 flex items-center gap-1">
                       <Home size={13} /> Depto {card.deptoNumero}
@@ -603,7 +670,7 @@ export function ListadoCobros() {
                     <div className="text-right">
                       {card.proximoVencimiento ? (
                         <div className="text-xs text-slate-500 font-medium">
-                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Límite Próximo</span>
+                          <span className="text-[10px] text-slate-400 uppercase font-bold block">Limite Proximo</span>
                           <span className={`font-bold flex items-center gap-1 justify-end ${esMora ? 'text-red-600' : 'text-slate-700'}`}>
                             <Calendar size={12} /> {formatFechaDMY(card.proximoVencimiento)}
                           </span>
@@ -636,33 +703,55 @@ export function ListadoCobros() {
         <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-4xl overflow-hidden max-h-[90vh] flex flex-col animate-scale-up">
             
-            {/* Cabecera */}
-            <div className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between shrink-0">
+            {/* Cabecera modal */}
+            <div className="bg-slate-900 px-6 py-4 text-white flex flex-wrap items-center justify-between gap-3 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-blue-600 rounded-xl">
                   <Wallet size={20} />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-base flex items-center gap-2">
-                    Cobranzas - {contratoActivo.inquilino}
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-extrabold text-base">
+                      Cobranzas - {contratoActivo.inquilino}
+                    </h3>
+                    {contratoActivo.estadoContrato === 'FINALIZADO' && (
+                      <span className="px-2 py-0.5 text-[10px] font-black bg-red-500/20 text-red-200 border border-red-400/40 rounded-md uppercase">
+                        Finalizado ({formatFechaDMY(contratoActivo.fechaFinContrato)})
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-slate-400">
-                    {contratoActivo.edificio} • Piso {contratoActivo.deptoPiso} Depto {contratoActivo.deptoNumero} {contratoActivo.deptoBloque ? `(${contratoActivo.deptoBloque})` : ''}
+                    {contratoActivo.edificio} • Piso {contratoActivo.deptoPiso} Depto {contratoActivo.deptoNumero} {contratoActivo.deptoBloque ? `(Bloque ${contratoActivo.deptoBloque})` : ''}
                   </p>
                 </div>
               </div>
 
-              <button 
-                type="button"
-                onClick={() => setContratoActivoId(null)} 
-                className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
-              >
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                {contratoActivo.estadoContrato !== 'FINALIZADO' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFechaFinalizacion(getHoyLocalISO());
+                      setModalFinalizarAbierto(true);
+                    }}
+                    className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                  >
+                    <FileX2 size={15} /> Finalizar Contrato
+                  </button>
+                )}
+
+                <button 
+                  type="button"
+                  onClick={() => setContratoActivoId(null)} 
+                  className="text-slate-400 hover:text-white p-1.5 rounded-lg transition-colors cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
-            {/* Resumen Superior */}
-            <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
+            {/* Resumen superior con selector manual de Fecha del Recibo al lado del Saldo */}
+            <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 shrink-0">
               <div className="p-3 bg-white border border-slate-200 rounded-xl">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Total Pagado</span>
                 <p className="text-lg font-black text-emerald-600 mt-0.5">
@@ -677,6 +766,19 @@ export function ListadoCobros() {
                 </p>
               </div>
 
+              {/* Selector manual de fecha para impresion de recibo */}
+              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl">
+                <label className="text-[11px] font-extrabold text-blue-800 uppercase tracking-wider flex items-center gap-1 mb-1">
+                  <Calendar size={12} /> Fecha del Recibo
+                </label>
+                <input
+                  type="date"
+                  value={fechaReciboManual}
+                  onChange={(e) => setFechaReciboManual(e.target.value)}
+                  className="w-full py-1 px-2 bg-white border border-blue-300 rounded-lg text-xs font-extrabold text-slate-800 outline-none focus:border-blue-600 cursor-pointer"
+                />
+              </div>
+
               <div className="p-3 bg-white border border-slate-200 rounded-xl">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Renta Pactada</span>
                 <p className="text-lg font-black text-slate-900 mt-0.5">
@@ -685,7 +787,7 @@ export function ListadoCobros() {
               </div>
             </div>
 
-            {/* Desglose Mensual */}
+            {/* Listado de cuotas por periodo */}
             <div className="p-6 overflow-y-auto flex-1 space-y-6">
               {gruposMensualesContrato.length > 0 ? (
                 gruposMensualesContrato.map((grupo) => (
@@ -697,7 +799,7 @@ export function ListadoCobros() {
                         <span className="font-extrabold text-slate-800 text-sm">{grupo.nombrePeriodo}</span>
                         {grupo.estaCompletamentePagado ? (
                           <span className="bg-emerald-100 text-emerald-800 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
-                            <CheckCircle2 size={12} /> Período Cancelado
+                            <CheckCircle2 size={12} /> Periodo Cancelado
                           </span>
                         ) : (
                           <span className="bg-amber-100 text-amber-800 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border border-amber-300 flex items-center gap-1">
@@ -712,7 +814,8 @@ export function ListadoCobros() {
                             type="button"
                             onClick={() => setReciboData({
                               contrato: contratoActivo,
-                              grupo
+                              grupo,
+                              fechaEmision: fechaReciboManual
                             })}
                             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
                           >
@@ -721,7 +824,7 @@ export function ListadoCobros() {
                         ) : (
                           <div 
                             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-100 border border-slate-200 text-slate-400 rounded-xl text-xs font-bold cursor-not-allowed select-none"
-                            title="Todos los conceptos de este período deben estar pagados para emitir recibo"
+                            title="Todos los conceptos de este periodo deben estar cancelados para emitir recibo"
                           >
                             <Lock size={13} className="text-slate-400" /> Recibo Bloqueado
                           </div>
@@ -734,9 +837,9 @@ export function ListadoCobros() {
                         <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-white">
                           <th className="py-2.5 px-4">Concepto</th>
                           <th className="py-2.5 px-4">Monto</th>
-                          <th className="py-2.5 px-4">Límite</th>
+                          <th className="py-2.5 px-4">Limite</th>
                           <th className="py-2.5 px-4">Estado</th>
-                          <th className="py-2.5 px-4 text-right">Acción</th>
+                          <th className="py-2.5 px-4 text-right">Accion</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 text-sm">
@@ -825,7 +928,7 @@ export function ListadoCobros() {
               )}
             </div>
 
-            {/* Pie */}
+            {/* Pie modal */}
             <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex justify-end">
               <button
                 type="button"
@@ -840,7 +943,79 @@ export function ListadoCobros() {
         </div>
       )}
 
-      {/* ================= SUBMODAL PAGO INDIVIDUAL CON AJUSTE Y EXCEPCIONES ================= */}
+      {/* ================= SUBMODAL FINALIZAR CONTRATO ================= */}
+      {modalFinalizarAbierto && contratoActivo && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-100 animate-scale-up">
+            <div className="bg-red-600 px-6 py-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <AlertTriangle size={20} />
+                <h3 className="font-extrabold text-base">Finalizar Contrato</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalFinalizarAbierto(false)}
+                className="text-red-100 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmarFinalizacion} className="p-6 space-y-4">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Estas a punto de concluir el contrato de <strong className="text-slate-900">{contratoActivo.inquilino}</strong> (Depto {contratoActivo.deptoNumero}).
+              </p>
+
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1">
+                <p className="font-bold">Al confirmar esta accion:</p>
+                <ul className="list-disc pl-4 space-y-0.5">
+                  <li>Se contabilizaran cuotas unicamente hasta el mes de la fecha indicada.</li>
+                  <li>Las cuotas pendientes de meses posteriores seran eliminadas.</li>
+                  <li>El departamento pasara a estado <strong>DISPONIBLE</strong>.</li>
+                </ul>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
+                  Fecha de Conclusion del Contrato *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={fechaFinalizacion}
+                  onChange={(e) => setFechaFinalizacion(e.target.value)}
+                  className="w-full py-2.5 px-3.5 border-2 border-slate-200 rounded-xl text-sm font-extrabold text-slate-900 outline-none focus:border-red-600"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setModalFinalizarAbierto(false)}
+                  className="px-4 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-100 text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={finalizandoContrato}
+                  className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg shadow-red-600/20 text-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                >
+                  {finalizandoContrato ? (
+                    <>
+                      <Loader2 size={15} className="animate-spin" /> Procesando...
+                    </>
+                  ) : (
+                    'Confirmar Finalizacion'
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ================= SUBMODAL PAGO INDIVIDUAL CON AJUSTES ================= */}
       {cobroAPagar && (
         <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-fade-in">
           <div className="bg-white rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl border border-slate-100 animate-scale-up">
@@ -860,7 +1035,7 @@ export function ListadoCobros() {
               <button 
                 type="button"
                 onClick={() => setCobroAPagar(null)} 
-                className="text-slate-400 hover:text-white p-1 rounded-lg"
+                className="text-slate-400 hover:text-white p-1 rounded-lg cursor-pointer"
               >
                 <X size={18} />
               </button>
@@ -868,13 +1043,13 @@ export function ListadoCobros() {
 
             <form onSubmit={handleConfirmarPago} className="p-6 space-y-4 max-h-[85vh] overflow-y-auto">
               
-              {/* Opción de Habilitar Ajuste / Excepción */}
+              {/* Seccion de excepciones y rebajas */}
               <div className="bg-blue-50/70 border border-blue-200 rounded-2xl p-3.5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <Sliders size={16} className="text-blue-600" />
                     <span className="text-xs font-extrabold text-blue-900">
-                      ¿Aplicar rebaja o excepción en este cobro?
+                      ¿Aplicar rebaja o excepcion en este cobro?
                     </span>
                   </div>
                   <label className="relative inline-flex items-center cursor-pointer">
@@ -898,11 +1073,10 @@ export function ListadoCobros() {
                   </label>
                 </div>
 
-                {/* Bloque expandible de ajuste */}
+                {/* Opciones del calculo de ajuste */}
                 {formPago.aplicarAjuste && (
                   <div className="mt-3 pt-3 border-t border-blue-200/80 space-y-3">
                     
-                    {/* Selector de Modo */}
                     <div className="grid grid-cols-3 gap-1.5 p-1 bg-white rounded-xl border border-blue-200 text-xs font-bold">
                       <button
                         type="button"
@@ -910,11 +1084,11 @@ export function ListadoCobros() {
                           setFormPago(prev => ({ ...prev, tipoAjuste: 'DIAS' }));
                           recalcularMontoAjuste('DIAS', formPago.diasPresentes);
                         }}
-                        className={`py-1.5 rounded-lg transition-all ${
+                        className={`py-1.5 rounded-lg transition-all cursor-pointer ${
                           formPago.tipoAjuste === 'DIAS' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-blue-600'
                         }`}
                       >
-                        Por Días (Viaje)
+                        Por Dias (Viaje)
                       </button>
                       <button
                         type="button"
@@ -922,7 +1096,7 @@ export function ListadoCobros() {
                           setFormPago(prev => ({ ...prev, tipoAjuste: 'PERSONAS' }));
                           recalcularMontoAjuste('PERSONAS', formPago.personasAjustadas);
                         }}
-                        className={`py-1.5 rounded-lg transition-all ${
+                        className={`py-1.5 rounded-lg transition-all cursor-pointer ${
                           formPago.tipoAjuste === 'PERSONAS' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-blue-600'
                         }`}
                       >
@@ -931,7 +1105,7 @@ export function ListadoCobros() {
                       <button
                         type="button"
                         onClick={() => setFormPago(prev => ({ ...prev, tipoAjuste: 'MANUAL' }))}
-                        className={`py-1.5 rounded-lg transition-all ${
+                        className={`py-1.5 rounded-lg transition-all cursor-pointer ${
                           formPago.tipoAjuste === 'MANUAL' ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-blue-600'
                         }`}
                       >
@@ -939,12 +1113,12 @@ export function ListadoCobros() {
                       </button>
                     </div>
 
-                    {/* Modo 1: Por Días */}
+                    {/* Modo 1: Dias de estadia */}
                     {formPago.tipoAjuste === 'DIAS' && (
                       <div className="bg-white p-3 rounded-xl border border-blue-100 space-y-1.5">
                         <div className="flex justify-between text-xs font-bold text-slate-700">
-                          <span>Días habitados este mes:</span>
-                          <span className="text-blue-600 font-extrabold">{formPago.diasPresentes} de 30 días</span>
+                          <span>Dias habitados este mes:</span>
+                          <span className="text-blue-600 font-extrabold">{formPago.diasPresentes} de 30 dias</span>
                         </div>
                         <input 
                           type="range"
@@ -959,12 +1133,12 @@ export function ListadoCobros() {
                           className="w-full accent-blue-600 cursor-pointer"
                         />
                         <span className="text-[11px] text-slate-400 block">
-                          Prorratea el total del mes sobre una base estándar de 30 días.
+                          Prorratea el total del mes sobre una base estandar de 30 dias.
                         </span>
                       </div>
                     )}
 
-                    {/* Modo 2: Por Personas */}
+                    {/* Modo 2: Numero de personas */}
                     {formPago.tipoAjuste === 'PERSONAS' && (
                       <div className="bg-white p-3 rounded-xl border border-blue-100 flex items-center justify-between">
                         <label className="text-xs font-bold text-slate-700">
@@ -985,11 +1159,11 @@ export function ListadoCobros() {
                       </div>
                     )}
 
-                    {/* Modo 3: Monto Manual */}
+                    {/* Modo 3: Monto manual directo */}
                     {formPago.tipoAjuste === 'MANUAL' && (
                       <div className="bg-white p-3 rounded-xl border border-blue-100 flex items-center justify-between">
                         <label className="text-xs font-bold text-slate-700">
-                          Importe acordado (Bs.):
+                          Importe acordado ({cobroAPagar.moneda || 'BOB'}):
                         </label>
                         <input 
                           type="number"
@@ -1008,15 +1182,15 @@ export function ListadoCobros() {
                       </div>
                     )}
 
-                    {/* Campo de Motivo */}
+                    {/* Justificacion de la excepcion */}
                     <div>
                       <label className="block text-xs font-extrabold text-blue-900 mb-1">
-                        Motivo de la excepción / observación *
+                        Motivo de la excepcion / observacion *
                       </label>
                       <input 
                         type="text"
                         required={formPago.aplicarAjuste}
-                        placeholder="Ej. Viaje 15 días, Visitas familiares, Descuento autorizado..."
+                        placeholder="Ej. Viaje 15 dias, Visitas familiares, Descuento autorizado..."
                         value={formPago.motivoAjuste}
                         onChange={(e) => setFormPago({ ...formPago, motivoAjuste: e.target.value })}
                         className="w-full py-2 px-3 bg-white border border-blue-300 rounded-xl text-xs font-semibold text-slate-800 outline-none focus:border-blue-600"
@@ -1027,7 +1201,7 @@ export function ListadoCobros() {
                 )}
               </div>
 
-              {/* Monto Final a Cobrar */}
+              {/* Monto final a cobrar */}
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
                   Monto Final a Cobrar ({cobroAPagar.moneda || 'BOB'}) *
@@ -1056,10 +1230,10 @@ export function ListadoCobros() {
                 </div>
               </div>
 
-              {/* Método de Pago */}
+              {/* Metodo de pago */}
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
-                  Método de Pago *
+                  Metodo de Pago *
                 </label>
                 <select 
                   value={formPago.metodo_pago} 
@@ -1068,14 +1242,14 @@ export function ListadoCobros() {
                 >
                   <option value="EFECTIVO">Efectivo</option>
                   <option value="TRANSFERENCIA">Transferencia Bancaria / QR</option>
-                  <option value="TARJETA">Tarjeta Débito / Crédito</option>
+                  <option value="TARJETA">Tarjeta Debito / Credito</option>
                 </select>
               </div>
 
               {/* Comprobante */}
               <div>
                 <label className="block text-xs font-bold text-slate-600 uppercase mb-1">
-                  Nº Comprobante / Transacción (Opcional)
+                  Nº Comprobante / Transaccion (Opcional)
                 </label>
                 <input 
                   type="text" 
@@ -1086,7 +1260,7 @@ export function ListadoCobros() {
                 />
               </div>
 
-              {/* Botones de Acción */}
+              {/* Acciones */}
               <div className="flex justify-end gap-2 pt-4 border-t border-slate-100">
                 <button 
                   type="button" 

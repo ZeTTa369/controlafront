@@ -3,30 +3,40 @@ import {
   FileText, 
   Home, 
   User, 
-  Users,
+  Users, 
   Calendar, 
-  Clock,
-  DollarSign, 
-  ShieldCheck, 
+  Clock, 
   Download, 
   CheckSquare, 
   Square, 
   Eye, 
   X, 
   Loader2, 
-  Search,
-  ListChecks,
-  UserPlus,
-  Trash2,
-  Calculator
+  Search, 
+  ListChecks, 
+  UserPlus, 
+  Trash2, 
+  Calculator, 
+  Key, 
+  Globe, 
+  Paperclip, 
+  FileUp, 
+  Image as ImageIcon 
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import jsPDF from 'jspdf';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
 import { ModalNuevoHabitante } from '../modals/ModalNuevoHabitante';
-import { crearContrato, registrarHabitantesBatch } from '../../services/contratoService';
+import { 
+  crearContrato, 
+  registrarHabitantesBatch, 
+  subirDocumentosContrato 
+} from '../../services/contratoService';
 import { listarUsuarios, crearUsuario } from '../../services/usuarioService';
+import { listarDepartamentos } from '../../services/departamentoService';
+import { listarEdificios } from '../../services/edificioService';
 
+// Ordenamiento de conceptos financieros por prioridad comercial
 const getPrioridadConcepto = (nombre = '') => {
   const n = nombre.toUpperCase();
   if (n.includes('ALQUILER') || n.includes('RENTA') || n.includes('CANON')) return 1;
@@ -36,6 +46,7 @@ const getPrioridadConcepto = (nombre = '') => {
   return 5;
 };
 
+// Calculo de periodo limite de pago segun regla del multiplo de 5
 const calcularPeriodoLimitePago = (fechaInicioStr) => {
   if (!fechaInicioStr) return { inicio: '17', fin: '20', texto: 'Del 17 al 20 de cada mes' };
 
@@ -75,41 +86,46 @@ export function NuevoContrato({ onClose, onSave }) {
   const [conceptosBD, setConceptosBD] = useState([]);
   const [loadingCatalogos, setLoadingCatalogos] = useState(true);
 
-  // Formulario General
+  // Datos generales del contrato
   const [formData, setFormData] = useState({
     id_departamento: '',
     tipo_contrato: 'DIRECTO',
-    beneficiario_tercero: '',
     fecha_inicio: '',
     fecha_fin: '',
     moneda: 'BOB',
     garantia: '1700',
+    numero_llaves: '1',
     dia_limite_inicio: '17',
     dia_limite_fin: '20',
     texto_limite_pago: 'Del 17 al 20 de cada mes',
   });
 
-  // Datos Inquilino Titular
+  // Datos del inquilino titular
   const [inquilinoData, setInquilinoData] = useState({
     id_usuario: '',
     nombre: '',
     primer_apellido: '',
     segundo_apellido: '',
     ci_nit: '',
+    nacionalidad: 'Boliviana',
     telefono: '',
     email: '',
   });
 
-  // Habitantes adicionales
+  // Censo de habitantes adicionales
   const [habitantes, setHabitantes] = useState([]);
   const [modalHabitanteAbierto, setModalHabitanteAbierto] = useState(false);
 
-  // Multiplicación automática de servicios
+  // Documentos digitales de respaldo (PDF e imagenes)
+  const [documentosAdjuntos, setDocumentosAdjuntos] = useState([]);
+  const [etiquetaDocTemp, setEtiquetaDocTemp] = useState('CI Titular');
+
+  // Calculo automatico de servicios basicos
   const [multiplicarServiciosAutomatico, setMultiplicarServiciosAutomatico] = useState(true);
   const PRECIO_UNITARIO_AGUA = 40;
   const PRECIO_UNITARIO_LUZ = 40;
 
-  // Conceptos seleccionados dinámicamente
+  // Conceptos activos del contrato
   const [conceptosSeleccionados, setConceptosSeleccionados] = useState({});
 
   const [cobrosGenerados, setCobrosGenerados] = useState([]);
@@ -125,7 +141,7 @@ export function NuevoContrato({ onClose, onSave }) {
     cargarCatalogos();
   }, []);
 
-  // Recalcular Agua y Luz automáticamente al cambiar habitantes o checkbox
+  // Recalculo de cuotas de agua y luz segun total de habitantes
   useEffect(() => {
     if (!multiplicarServiciosAutomatico) return;
 
@@ -149,17 +165,16 @@ export function NuevoContrato({ onClose, onSave }) {
     });
   }, [totalPersonasHabitantes, multiplicarServiciosAutomatico]);
 
+  // Carga de catalogos mediante la capa de servicios
   const cargarCatalogos = async () => {
     setLoadingCatalogos(true);
     try {
-      const [resDeptos, resEdificios, resConceptos] = await Promise.all([
-        fetch(`${BASE_URL}/departamentos`, { headers: getAuthHeaders() }),
-        fetch(`${BASE_URL}/edificios`, { headers: getAuthHeaders() }),
+      const [dataDeptos, dataEdificios, resConceptos] = await Promise.all([
+        listarDepartamentos(),
+        listarEdificios(),
         fetch(`${BASE_URL}/conceptos`, { headers: getAuthHeaders() }),
       ]);
 
-      const dataDeptos = await handleResponse(resDeptos);
-      const dataEdificios = await handleResponse(resEdificios);
       const dataConceptos = await handleResponse(resConceptos);
 
       const mapEdificios = {};
@@ -179,13 +194,18 @@ export function NuevoContrato({ onClose, onSave }) {
             return {
               id: d.id_departamento || d.id,
               texto: `${edNombre} - Piso ${d.piso || 1} Depto ${num}`,
-              precio_alquiler: d.precio_alquiler || 1550
+              precio_alquiler: d.precio_alquiler || 1550,
+              numero_llaves: d.numero_llaves !== null && d.numero_llaves !== undefined ? Number(d.numero_llaves) : 1
             };
           });
 
         setDepartamentosDisponibles(deptosBD);
         if (deptosBD.length > 0) {
-          setFormData(prev => ({ ...prev, id_departamento: deptosBD[0].id }));
+          setFormData(prev => ({ 
+            ...prev, 
+            id_departamento: deptosBD[0].id,
+            numero_llaves: String(deptosBD[0].numero_llaves)
+          }));
         }
       }
 
@@ -200,11 +220,23 @@ export function NuevoContrato({ onClose, onSave }) {
         setConceptosBD(ordenados);
       }
     } catch (error) {
-      console.error('Error cargando catálogos:', error);
-      toast.error('Error al conectar con los catálogos del servidor');
+      console.error('Error cargando catalogos:', error);
+      toast.error('Error al conectar con los catalogos del servidor');
     } finally {
       setLoadingCatalogos(false);
     }
+  };
+
+  // Al cambiar de departamento, sincroniza la cantidad de llaves por defecto
+  const handleDepartamentoChange = (e) => {
+    const idSeleccionado = e.target.value;
+    const deptoObj = departamentosDisponibles.find(d => String(d.id) === String(idSeleccionado));
+
+    setFormData(prev => ({
+      ...prev,
+      id_departamento: idSeleccionado,
+      numero_llaves: deptoObj ? String(deptoObj.numero_llaves) : '1'
+    }));
   };
 
   const handleFechaInicioChange = (e) => {
@@ -266,7 +298,28 @@ export function NuevoContrato({ onClose, onSave }) {
 
   const handleEliminarHabitante = (idTemp) => {
     setHabitantes(prev => prev.filter(h => h.id_temp !== idTemp));
-    toast('Habitante eliminado de la lista', { icon: '🗑️' });
+    toast.success('Habitante eliminado de la lista');
+  };
+
+  // Manejo de seleccion de archivos PDF e imagenes de respaldo
+  const handleSeleccionarArchivos = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const nuevos = files.map((file) => ({
+      id_temp: `${Date.now()}_${Math.random()}`,
+      file,
+      etiqueta: etiquetaDocTemp || file.name,
+      esPdf: file.type === 'application/pdf',
+    }));
+
+    setDocumentosAdjuntos((prev) => [...prev, ...nuevos]);
+    toast.success(`${files.length} archivo(s) preparado(s) para subir`);
+    e.target.value = '';
+  };
+
+  const handleQuitarDocumento = (idTemp) => {
+    setDocumentosAdjuntos((prev) => prev.filter((d) => d.id_temp !== idTemp));
   };
 
   const listaConceptosActivosOrdenados = useMemo(() => {
@@ -286,7 +339,7 @@ export function NuevoContrato({ onClose, onSave }) {
     return listaConceptosActivosOrdenados.reduce((acc, c) => acc + (parseFloat(c.monto) || 0), 0);
   }, [listaConceptosActivosOrdenados]);
 
-  // Consumimos listarUsuarios() desde el service
+  // Busqueda de inquilino existente por cedula de identidad
   const buscarInquilinoPorCI = async () => {
     if (!inquilinoData.ci_nit.trim()) {
       toast.error('Ingresa un CI/NIT para buscar');
@@ -307,12 +360,13 @@ export function NuevoContrato({ onClose, onSave }) {
           primer_apellido: encontrado.primer_apellido || '',
           segundo_apellido: encontrado.segundo_apellido || '',
           ci_nit: encontrado.ci_nit || '',
+          nacionalidad: encontrado.nacionalidad || 'Boliviana',
           telefono: encontrado.telefono || '',
           email: encontrado.email || '',
         });
         toast.success(`Inquilino encontrado: ${encontrado.nombre} ${encontrado.primer_apellido}`);
       } else {
-        toast('No existe registro previo. Completa los datos para crearlo automáticamente.', { icon: 'ℹ️' });
+        toast('No existe registro previo. Completa los datos para crearlo automaticamente.');
       }
     } catch (error) {
       toast.error('Error al consultar usuarios en el servidor');
@@ -327,6 +381,7 @@ export function NuevoContrato({ onClose, onSave }) {
     return `${d}/${m}/${y}`;
   };
 
+  // Proyeccion de cuotas mensuales
   const calcularVistaPreviaCobros = () => {
     if (!formData.fecha_inicio || !formData.fecha_fin) {
       toast.error('Ingresa la fecha de inicio y fin del contrato.');
@@ -345,7 +400,7 @@ export function NuevoContrato({ onClose, onSave }) {
     const fin = new Date(yFin, mFin - 1, dFin);
 
     if (inicio >= fin) {
-      toast.error('La fecha de finalización debe ser posterior a la de inicio.');
+      toast.error('La fecha de finalizacion debe ser posterior a la de inicio.');
       return;
     }
 
@@ -378,6 +433,7 @@ export function NuevoContrato({ onClose, onSave }) {
     toast.success(`Se generaron ${listaTemporal.length} cuotas programadas.`);
   };
 
+  // Generacion de documento PDF protocolizado
   const generarPDFContrato = () => {
     const doc = new jsPDF();
     const deptoObj = departamentosDisponibles.find(d => String(d.id) === String(formData.id_departamento));
@@ -391,42 +447,39 @@ export function NuevoContrato({ onClose, onSave }) {
 
     doc.setFontSize(9);
     doc.setTextColor(100, 116, 139);
-    doc.text(`Fecha de Emisión: ${fechaEmisionHoy}`, 20, 28);
+    doc.text(`Fecha de Emision: ${fechaEmisionHoy}`, 20, 28);
 
     doc.setDrawColor(203, 213, 225);
     doc.line(20, 32, 190, 32);
 
-    // 1. PARTES Y UBICACIÓN
+    // 1. Partes y ubicacion del inmueble
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
     doc.setTextColor(15, 23, 42);
-    doc.text("1. PARTES Y UBICACIÓN DEL INMUEBLE", 20, 42);
+    doc.text("1. PARTES Y UBICACION DEL INMUEBLE", 20, 42);
 
     doc.setFont("helvetica", "normal");
     doc.setFontSize(10);
-    doc.text(`Inmueble: ${deptoObj?.texto || 'Ubicación Residencial'}`, 25, 50);
-    doc.text(`Inquilino / Arrendatario: ${nombreCompletoInquilino} (CI: ${inquilinoData.ci_nit})`, 25, 57);
-    doc.text(`Tipo de Contrato: ${formData.tipo_contrato}`, 25, 64);
+    doc.text(`Inmueble: ${deptoObj?.texto || 'Ubicacion Residencial'}`, 25, 50);
+    doc.text(`Inquilino / Arrendatario: ${nombreCompletoInquilino}`, 25, 57);
+    doc.text(`Documento: ${inquilinoData.ci_nit} • Nacionalidad: ${inquilinoData.nacionalidad || 'Boliviana'}`, 25, 64);
+    doc.text(`Tipo de Contrato: ${formData.tipo_contrato} • Llaves Entregadas: ${formData.numero_llaves || 1} juego(s)`, 25, 71);
     
-    let yPos = 64;
-    if (formData.tipo_contrato === 'TERCEROS' && formData.beneficiario_tercero) {
-      yPos += 7;
-      doc.text(`Beneficiario / Ocupante Real: ${formData.beneficiario_tercero}`, 25, yPos);
-    }
-
-    yPos += 7;
+    let yPos = 78;
     doc.text(`Total Habitantes Autorizados: ${totalPersonasHabitantes} personas (${inquilinoData.nombre} + ${habitantes.length} dependientes)`, 25, yPos);
 
     if (habitantes.length > 0) {
       yPos += 6;
       doc.setFontSize(9);
       doc.setTextColor(71, 85, 105);
-      const nombresHabitantes = habitantes.map(h => `${h.nombres} ${h.primer_apellido}${h.ci_nit ? ` (CI: ${h.ci_nit})` : ''} - ${h.parentesco}`).join(', ');
+      const nombresHabitantes = habitantes.map(h => 
+        `${h.nombres} ${h.primer_apellido}${h.ci_nit ? ` (CI: ${h.ci_nit})` : ''} - Nac: ${h.nacionalidad || 'Boliviana'} - ${h.parentesco}`
+      ).join(', ');
       doc.text(`Habitantes: ${nombresHabitantes}`, 28, yPos, { maxWidth: 160 });
-      yPos += 5;
+      yPos += 8;
     }
 
-    // 2. VIGENCIA Y PLAZO
+    // 2. Vigencia y plazo
     yPos += 10;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
@@ -440,9 +493,9 @@ export function NuevoContrato({ onClose, onSave }) {
     yPos += 7;
     doc.text(`Fin de Vigencia: ${formatearFechaDMY(formData.fecha_fin)}`, 25, yPos);
     yPos += 7;
-    doc.text(`Período Límite de Pago: ${formData.texto_limite_pago}`, 25, yPos);
+    doc.text(`Periodo Limite de Pago: ${formData.texto_limite_pago}`, 25, yPos);
 
-    // 3. CONDICIONES FINANCIERAS
+    // 3. Condiciones financieras
     yPos += 12;
     doc.setFont("helvetica", "bold");
     doc.setFontSize(11);
@@ -453,7 +506,7 @@ export function NuevoContrato({ onClose, onSave }) {
     
     let numItem = 1;
     yPos += 8;
-    doc.text(`${numItem}. Depósito de Garantía: ${Number(formData.garantia || 0).toFixed(2)} ${formData.moneda}`, 25, yPos);
+    doc.text(`${numItem}. Deposito de Garantia: ${Number(formData.garantia || 0).toFixed(2)} ${formData.moneda}`, 25, yPos);
 
     listaConceptosActivosOrdenados.forEach(c => {
       numItem += 1;
@@ -465,7 +518,7 @@ export function NuevoContrato({ onClose, onSave }) {
     doc.setFont("helvetica", "bold");
     doc.setTextColor(30, 64, 175);
     doc.text(
-      `TOTAL MENSUAL RECURRENTE (Sin Garantía): ${totalMensualRecurrente.toFixed(2)} ${formData.moneda}`, 
+      `TOTAL MENSUAL RECURRENTE (Sin Garantia): ${totalMensualRecurrente.toFixed(2)} ${formData.moneda}`, 
       25, 
       yPos
     );
@@ -484,6 +537,7 @@ export function NuevoContrato({ onClose, onSave }) {
     doc.save(`Contrato_${inquilinoData.primer_apellido || 'Inquilino'}_${fechaLimpia}.pdf`);
   };
 
+  // Persistencia completa en cascada
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!mostrarVistaPrevia || cobrosGenerados.length === 0) {
@@ -492,12 +546,12 @@ export function NuevoContrato({ onClose, onSave }) {
     }
 
     setIsSubmitting(true);
-    const toastId = toast.loading('Guardando contrato, inquilino y habitantes...');
+    const toastId = toast.loading('Guardando contrato, inquilino, censo y respaldos...');
 
     try {
       let idUsuarioFinal = inquilinoData.id_usuario;
 
-      // 1. Inquilino Titular si no existe (usando usuarioService)
+      // 1. Crear cuenta de acceso en usuarios si no existe previamente
       if (!idUsuarioFinal) {
         const passwordBase = String(inquilinoData.ci_nit).trim().length >= 6 
           ? String(inquilinoData.ci_nit).trim() 
@@ -518,44 +572,82 @@ export function NuevoContrato({ onClose, onSave }) {
         idUsuarioFinal = nuevoUser.id_usuario || nuevoUser.id;
       }
 
-      // 2. Crear contrato (usando contratoService)
+      // 2. Registrar el contrato principal
       const conceptosIds = listaConceptosActivosOrdenados.map(c => c.id_concepto);
+      const conceptosDetalle = listaConceptosActivosOrdenados.map(c => ({
+        id_concepto: Number(c.id_concepto),
+        monto: Number(c.monto) || 0,
+      }));
+
+      // Extraer el monto especifico del alquiler (si existe) para monto_renta
+      const conceptoAlquiler = listaConceptosActivosOrdenados.find(c => {
+        const n = (c.nombre || '').toUpperCase();
+        return n.includes('ALQUILER') || n.includes('RENTA') || n.includes('CANON');
+      });
+      const montoSoloAlquiler = conceptoAlquiler ? Number(conceptoAlquiler.monto) : Number(totalMensualRecurrente);
 
       const payloadContrato = {
         id_departamento: Number(formData.id_departamento),
         id_usuario: Number(idUsuarioFinal),
         fecha_inicio: formData.fecha_inicio,
         fecha_fin: formData.fecha_fin,
-        monto_renta: Number(totalMensualRecurrente),
+        monto_renta: montoSoloAlquiler,
         moneda: formData.moneda,
         garantia: parseFloat(formData.garantia) || 0,
+        numero_llaves: Number(formData.numero_llaves) || 1,
         estado: formData.tipo_contrato,
         conceptosIds: conceptosIds,
+        conceptosDetalle: conceptosDetalle,
       };
 
-      const dataContrato = await crearContrato(payloadContrato);
-      const nuevoIdContrato = dataContrato.id_contrato || dataContrato.id;
+      // 3. Registrar censo completo en la tabla habitantes (Titular + Dependientes)
+      if (nuevoIdContrato) {
+        const listaCenso = [];
 
-      // 3. Registrar lote de habitantes (usando contratoService)
-      if (habitantes.length > 0 && nuevoIdContrato) {
-        const payloadHabitantes = habitantes.map(h => ({
-          id_contrato: Number(nuevoIdContrato),
-          id_departamento: Number(formData.id_departamento),
-          nombres: h.nombres,
-          primer_apellido: h.primer_apellido,
-          segundo_apellido: h.segundo_apellido || null,
-          ci_nit: h.ci_nit || null,
-          parentesco: h.parentesco || 'Familiar',
-          telefono: h.telefono || null,
-          es_titular: 'NO',
-          estado: 'ACTIVO',
-        }));
+        if (formData.tipo_contrato !== 'TERCEROS') {
+          listaCenso.push({
+            id_contrato: Number(nuevoIdContrato),
+            id_departamento: Number(formData.id_departamento),
+            nombres: inquilinoData.nombre.trim(),
+            primer_apellido: inquilinoData.primer_apellido.trim(),
+            segundo_apellido: inquilinoData.segundo_apellido?.trim() || null,
+            ci_nit: inquilinoData.ci_nit.trim(),
+            nacionalidad: inquilinoData.nacionalidad?.trim() || 'Boliviana',
+            parentesco: 'Titular',
+            telefono: inquilinoData.telefono?.trim() || null,
+            es_titular: 'SI',
+            estado: 'ACTIVO',
+          });
+        }
 
-        await registrarHabitantesBatch(payloadHabitantes);
+        habitantes.forEach(h => {
+          listaCenso.push({
+            id_contrato: Number(nuevoIdContrato),
+            id_departamento: Number(formData.id_departamento),
+            nombres: h.nombres,
+            primer_apellido: h.primer_apellido,
+            segundo_apellido: h.segundo_apellido || null,
+            ci_nit: h.ci_nit || null,
+            nacionalidad: h.nacionalidad || 'Boliviana',
+            parentesco: h.parentesco || 'Familiar',
+            telefono: h.telefono || null,
+            es_titular: 'NO',
+            estado: 'ACTIVO',
+          });
+        });
+
+        if (listaCenso.length > 0) {
+          await registrarHabitantesBatch(listaCenso);
+        }
+
+        // 4. Subir documentos digitales de respaldo (PDF e imagenes) si se adjuntaron
+        if (documentosAdjuntos.length > 0) {
+          await subirDocumentosContrato(nuevoIdContrato, documentosAdjuntos);
+        }
       }
 
       generarPDFContrato();
-      toast.success('¡Contrato y habitantes registrados exitosamente!', { id: toastId });
+      toast.success('Contrato, censo y documentos registrados exitosamente', { id: toastId });
 
       if (onSave) onSave(dataContrato);
       if (onClose) onClose();
@@ -577,7 +669,7 @@ export function NuevoContrato({ onClose, onSave }) {
           </div>
           <div>
             <h2 className="text-xl font-extrabold">Registrar Nuevo Contrato</h2>
-            <p className="text-sm text-slate-400">Inquilino, censo de habitantes y desglose financiero</p>
+            <p className="text-sm text-slate-400">Inquilino, entrega de llaves, censo de habitantes y respaldos digitales</p>
           </div>
         </div>
 
@@ -590,8 +682,8 @@ export function NuevoContrato({ onClose, onSave }) {
 
       <form onSubmit={handleSubmit} className="p-8 space-y-6">
 
-        {/* 1. SELECCIÓN DE UNIDAD Y TIPO */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* 1. SELECCION DE UNIDAD, TIPO Y LLAVES ENTREGADAS */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">Piso y Departamento</label>
             <div className="relative flex items-center">
@@ -600,9 +692,9 @@ export function NuevoContrato({ onClose, onSave }) {
                 name="id_departamento"
                 required
                 value={formData.id_departamento}
-                onChange={(e) => setFormData({ ...formData, id_departamento: e.target.value })}
+                onChange={handleDepartamentoChange}
                 disabled={loadingCatalogos}
-                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl font-bold appearance-none text-sm outline-none focus:border-blue-600 bg-white"
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl font-bold appearance-none text-sm outline-none focus:border-blue-600 bg-white cursor-pointer"
               >
                 {loadingCatalogos ? (
                   <option>Cargando unidades...</option>
@@ -627,23 +719,30 @@ export function NuevoContrato({ onClose, onSave }) {
             >
               <option value="DIRECTO">Contratante Directo</option>
               <option value="TERCEROS">Contratante para Terceros</option>
-              <option value="RENOVACION">Renovación</option>
+              <option value="RENOVACION">Renovacion</option>
             </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-2">Llaves Entregadas *</label>
+            <div className="relative flex items-center">
+              <Key size={18} className="absolute left-4 text-slate-400 pointer-events-none" />
+              <input
+                type="number"
+                min="0"
+                required
+                value={formData.numero_llaves}
+                onChange={(e) => setFormData({ ...formData, numero_llaves: e.target.value })}
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl font-extrabold text-sm outline-none focus:border-blue-600 bg-white"
+              />
+            </div>
           </div>
         </div>
 
-        {/* Beneficiario Terceros */}
+        {/* Nota informativa cuando es contrato para terceros */}
         {formData.tipo_contrato === 'TERCEROS' && (
-          <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl animate-fade-in">
-            <label className="block text-xs font-bold text-amber-900 mb-1">Nombre del Beneficiario / Ocupante Real</label>
-            <input
-              type="text"
-              name="beneficiario_tercero"
-              placeholder="Ej. Carlos Mendoza (Ocupante)"
-              value={formData.beneficiario_tercero}
-              onChange={(e) => setFormData({ ...formData, beneficiario_tercero: e.target.value })}
-              className="w-full py-2.5 px-3 border border-amber-300 rounded-lg text-sm font-semibold bg-white outline-none focus:border-amber-600"
-            />
+          <div className="p-3.5 bg-blue-50 border border-blue-200 rounded-xl text-xs font-semibold text-blue-900">
+            Nota: Para contratos celebrados a favor de terceros, registra al ocupante real directamente en la seccion inferior de Habitantes.
           </div>
         )}
 
@@ -654,7 +753,7 @@ export function NuevoContrato({ onClose, onSave }) {
               <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
                 <User size={18} className="text-blue-600" /> Datos del Inquilino Titular
               </h3>
-              <p className="text-xs text-slate-500">Representante que firma el contrato y asume la responsabilidad</p>
+              <p className="text-xs text-slate-500">Representante que firma el contrato y asume la responsabilidad legal</p>
             </div>
             
             <button
@@ -705,7 +804,7 @@ export function NuevoContrato({ onClose, onSave }) {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-600 mb-1">Segundo Apellido</label>
               <input
@@ -718,7 +817,22 @@ export function NuevoContrato({ onClose, onSave }) {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">Teléfono / Celular</label>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Nacionalidad *</label>
+              <div className="relative flex items-center">
+                <Globe size={14} className="absolute left-3 text-slate-400 pointer-events-none" />
+                <input
+                  type="text"
+                  required
+                  placeholder="Ej. Boliviana"
+                  value={inquilinoData.nacionalidad}
+                  onChange={(e) => setInquilinoData({ ...inquilinoData, nacionalidad: e.target.value })}
+                  className="w-full py-2.5 pl-8 pr-3 border border-slate-300 rounded-xl text-sm font-semibold bg-white outline-none focus:border-blue-600"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Telefono / Celular</label>
               <input
                 type="text"
                 placeholder="Ej. 70000000"
@@ -729,7 +843,7 @@ export function NuevoContrato({ onClose, onSave }) {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-slate-600 mb-1">Correo Electrónico</label>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Correo Electronico</label>
               <input
                 type="email"
                 placeholder="inquilino@email.com"
@@ -741,18 +855,18 @@ export function NuevoContrato({ onClose, onSave }) {
           </div>
         </div>
 
-        {/* 3. SECCIÓN DE HABITANTES */}
+        {/* 3. SECCION DE HABITANTES / OCUPANTES */}
         <div className="border border-blue-200 bg-blue-50/40 rounded-2xl p-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
             <div>
               <div className="flex items-center gap-2">
                 <Users size={20} className="text-blue-600" />
                 <h3 className="text-base font-extrabold text-slate-800">
-                  Habitantes del Departamento ({totalPersonasHabitantes} en total)
+                  Habitantes y Ocupantes ({totalPersonasHabitantes} en total)
                 </h3>
               </div>
               <p className="text-xs text-slate-500 mt-0.5">
-                Titular + {habitantes.length} dependientes registrados en la tabla de habitantes
+                Titular + {habitantes.length} dependientes u ocupantes registrados
               </p>
             </div>
 
@@ -765,7 +879,7 @@ export function NuevoContrato({ onClose, onSave }) {
                     ? 'bg-blue-600 text-white border-blue-600 shadow-sm' 
                     : 'bg-white text-slate-600 border-slate-300'
                 }`}
-                title="Multiplica Agua y Luz automáticamente según el total de personas (Bs. 40 c/u)"
+                title="Multiplica Agua y Luz automaticamente segun el total de personas (Bs. 40 c/u)"
               >
                 <Calculator size={14} />
                 <span>Multiplicar Agua/Luz x Persona ({totalPersonasHabitantes})</span>
@@ -781,7 +895,7 @@ export function NuevoContrato({ onClose, onSave }) {
             </div>
           </div>
 
-          {/* Lista de habitantes */}
+          {/* Lista de habitantes registrados */}
           {habitantes.length > 0 ? (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
               {habitantes.map((hab) => (
@@ -791,7 +905,7 @@ export function NuevoContrato({ onClose, onSave }) {
                       {hab.nombres} {hab.primer_apellido} {hab.segundo_apellido}
                     </p>
                     <p className="text-xs text-slate-500 font-medium">
-                      CI: <span className="font-bold text-slate-700">{hab.ci_nit || 'S/C'}</span> • <span className="text-blue-600 font-semibold">{hab.parentesco}</span>
+                      CI: <span className="font-bold text-slate-700">{hab.ci_nit || 'S/C'}</span> • Nac: <span className="font-semibold text-slate-700">{hab.nacionalidad}</span> • <span className="text-blue-600 font-semibold">{hab.parentesco}</span>
                       {hab.telefono && ` • Tel: ${hab.telefono}`}
                     </p>
                   </div>
@@ -807,12 +921,12 @@ export function NuevoContrato({ onClose, onSave }) {
             </div>
           ) : (
             <div className="p-3.5 bg-white/80 rounded-xl border border-dashed border-blue-200 text-center text-xs text-slate-500">
-              No hay habitantes adicionales registrados. Solo habitará el inquilino titular ({inquilinoData.nombre || 'Titular'}).
+              No hay habitantes adicionales registrados. Solo residira el titular ({inquilinoData.nombre || 'Titular'}).
             </div>
           )}
         </div>
 
-        {/* 4. VIGENCIA Y CÁLCULO DE PERÍODO DE PAGO (MÚLTIPLO DE 5) */}
+        {/* 4. VIGENCIA Y CALCULO DE PERIODO DE PAGO */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div>
             <label className="block text-sm font-bold text-slate-700 mb-2">Fecha de Inicio</label>
@@ -829,7 +943,7 @@ export function NuevoContrato({ onClose, onSave }) {
           </div>
 
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Fecha de Finalización</label>
+            <label className="block text-sm font-bold text-slate-700 mb-2">Fecha de Finalizacion</label>
             <div className="relative flex items-center">
               <Calendar size={18} className="absolute left-4 text-slate-400 pointer-events-none" />
               <input
@@ -843,7 +957,7 @@ export function NuevoContrato({ onClose, onSave }) {
           </div>
 
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Período de Pago Límite</label>
+            <label className="block text-sm font-bold text-slate-700 mb-2">Periodo de Pago Limite</label>
             <div className="relative flex items-center">
               <Clock size={18} className="absolute left-4 text-blue-600 pointer-events-none" />
               <input
@@ -856,7 +970,7 @@ export function NuevoContrato({ onClose, onSave }) {
           </div>
         </div>
 
-        {/* 5. CHECKLIST DINÁMICA DE CONCEPTOS DESDE BD */}
+        {/* 5. CHECKLIST DINAMICA DE CONCEPTOS */}
         <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50/50">
           <h3 className="text-base font-extrabold text-slate-800 mb-1 flex items-center gap-2">
             <ListChecks size={20} className="text-blue-600" /> Conceptos de Cobro (Base de Datos)
@@ -906,16 +1020,16 @@ export function NuevoContrato({ onClose, onSave }) {
           </div>
         </div>
 
-        {/* 6. DESGLOSE FINANCIERO DINÁMICO ORDENADO */}
+        {/* 6. DESGLOSE FINANCIERO ORDENADO */}
         <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50/40">
           <h3 className="text-base font-extrabold text-slate-800 mb-1">Desglose de Condiciones Financieras</h3>
           <p className="text-xs text-slate-500 mb-4">
-            Resumen visual ordenado (1. Garantía, 2. Alquiler, 3. Expensas, 4. Agua, 5. Luz, etc.):
+            Resumen visual ordenado (1. Garantia, 2. Alquiler, 3. Expensas, 4. Agua, 5. Luz, etc.):
           </p>
 
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
             <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-              <label className="block text-xs font-bold text-slate-700 mb-1">1. Dep. Garantía</label>
+              <label className="block text-xs font-bold text-slate-700 mb-1">1. Dep. Garantia</label>
               <input
                 type="number"
                 step="0.01"
@@ -940,15 +1054,91 @@ export function NuevoContrato({ onClose, onSave }) {
 
           {listaConceptosActivosOrdenados.length === 0 && (
             <p className="text-xs text-amber-700 bg-amber-50 p-3 rounded-xl border border-amber-200 mt-3">
-              ⚠️ Aún no has marcado ningún concepto en la checklist superior. Marca al menos el Alquiler para ver el desglose.
+              Aun no has marcado ningun concepto en la checklist superior. Marca al menos el Alquiler para ver el desglose.
             </p>
           )}
         </div>
 
-        {/* RESUMEN TOTAL Y BOTÓN DE VISTA PREVIA */}
+        {/* 7. DOCUMENTOS DE RESPALDO (CARNETS, CONTRATO ESCANEADO, INVENTARIO) */}
+        <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50/50">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                <Paperclip size={18} className="text-blue-600" /> Documentos de Respaldo (Opcional)
+              </h3>
+              <p className="text-xs text-slate-500">
+                Adjunta carnets de identidad, contrato firmado escaneado o inventarios en formato PDF o imagen
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Tipo de Documento</label>
+              <select
+                value={etiquetaDocTemp}
+                onChange={(e) => setEtiquetaDocTemp(e.target.value)}
+                className="w-full py-2.5 px-3 border border-slate-300 rounded-xl text-sm font-bold bg-white outline-none focus:border-blue-600 cursor-pointer"
+              >
+                <option value="CI Titular">CI Titular</option>
+                <option value="CI Habitante / Ocupante">CI Habitante / Ocupante</option>
+                <option value="Contrato Firmado Escaneado">Contrato Firmado Escaneado</option>
+                <option value="Acta de Entrega / Inventario">Acta de Entrega / Inventario</option>
+                <option value="Comprobante Garantia">Comprobante Garantia</option>
+                <option value="Otro Respaldo">Otro Respaldo</option>
+              </select>
+            </div>
+
+            <div className="sm:col-span-2 flex items-end">
+              <label className="w-full flex items-center justify-center gap-2 py-2.5 px-4 border-2 border-dashed border-blue-300 bg-blue-50/50 hover:bg-blue-50 text-blue-700 rounded-xl text-sm font-bold cursor-pointer transition-colors">
+                <FileUp size={18} />
+                <span>Seleccionar Archivo PDF o Imagen (JPG, PNG)</span>
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,image/*"
+                  onChange={handleSeleccionarArchivos}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
+          {documentosAdjuntos.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {documentosAdjuntos.map((doc) => (
+                <div
+                  key={doc.id_temp}
+                  className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200 shadow-sm"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                    <div className={`p-2 rounded-lg shrink-0 ${doc.esPdf ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+                      {doc.esPdf ? <FileText size={16} /> : <ImageIcon size={16} />}
+                    </div>
+                    <div className="min-w-0">
+                      <span className="inline-block px-2 py-0.5 text-[10px] font-extrabold rounded bg-slate-100 text-slate-700 uppercase mb-0.5">
+                        {doc.etiqueta}
+                      </span>
+                      <p className="text-xs font-semibold text-slate-700 truncate">{doc.file.name}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleQuitarDocumento(doc.id_temp)}
+                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* RESUMEN TOTAL Y BOTON DE VISTA PREVIA */}
         <div className="flex flex-col sm:flex-row items-center justify-between p-5 bg-blue-50 border border-blue-200 rounded-2xl gap-4">
           <div>
-            <span className="text-xs font-bold uppercase text-blue-800 tracking-wider">Total Mensual Recurrente (Sin Garantía):</span>
+            <span className="text-xs font-bold uppercase text-blue-800 tracking-wider">Total Mensual Recurrente (Sin Garantia):</span>
             <p className="text-2xl font-black text-blue-900">{totalMensualRecurrente.toFixed(2)} {formData.moneda} / mes</p>
           </div>
 
@@ -961,18 +1151,18 @@ export function NuevoContrato({ onClose, onSave }) {
           </button>
         </div>
 
-        {/* 7. VISTA PREVIA DE CUOTAS */}
+        {/* 8. VISTA PREVIA DE CUOTAS */}
         {mostrarVistaPrevia && (
           <div className="border border-blue-200 bg-blue-50/30 rounded-2xl p-6 animate-fade-in">
             <h3 className="text-base font-extrabold text-blue-900 mb-1">Vista Previa de Cuotas ({cobrosGenerados.length} en total)</h3>
-            <p className="text-xs text-slate-600 mb-4">Cobros programados automáticamente mes a mes:</p>
+            <p className="text-xs text-slate-600 mb-4">Cobros programados automaticamente mes a mes:</p>
 
             <div className="max-h-56 overflow-y-auto border border-blue-100 rounded-xl bg-white">
               <table className="w-full text-left text-xs border-collapse">
                 <thead>
                   <tr className="bg-blue-100/50 text-blue-900 font-bold border-b border-blue-100 uppercase">
                     <th className="py-2.5 px-4">#</th>
-                    <th className="py-2.5 px-4">Período (Mes / Año)</th>
+                    <th className="py-2.5 px-4">Periodo (Mes / Anio)</th>
                     <th className="py-2.5 px-4">Concepto</th>
                     <th className="py-2.5 px-4 text-right">Monto</th>
                   </tr>
@@ -992,7 +1182,7 @@ export function NuevoContrato({ onClose, onSave }) {
           </div>
         )}
 
-        {/* Botones de Acción */}
+        {/* Botones de Accion */}
         <div className="flex justify-end gap-3 pt-6 border-t border-slate-100">
           {onClose && (
             <button
@@ -1022,7 +1212,7 @@ export function NuevoContrato({ onClose, onSave }) {
 
       </form>
 
-      {/* Modal Separado */}
+      {/* Modal de Habitante / Ocupante */}
       <ModalNuevoHabitante
         isOpen={modalHabitanteAbierto}
         onClose={() => setModalHabitanteAbierto(false)}
