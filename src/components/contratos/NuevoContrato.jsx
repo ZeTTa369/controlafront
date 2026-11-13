@@ -18,13 +18,20 @@ import {
   Trash2, 
   Calculator, 
   Key, 
-  Globe 
+  Globe, 
+  Paperclip, 
+  FileUp, 
+  Image as ImageIcon 
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import jsPDF from 'jspdf';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
 import { ModalNuevoHabitante } from '../modals/ModalNuevoHabitante';
-import { crearContrato, registrarHabitantesBatch } from '../../services/contratoService';
+import { 
+  crearContrato, 
+  registrarHabitantesBatch, 
+  subirDocumentosContrato 
+} from '../../services/contratoService';
 import { listarUsuarios, crearUsuario } from '../../services/usuarioService';
 import { listarDepartamentos } from '../../services/departamentoService';
 import { listarEdificios } from '../../services/edificioService';
@@ -108,6 +115,10 @@ export function NuevoContrato({ onClose, onSave }) {
   // Censo de habitantes adicionales
   const [habitantes, setHabitantes] = useState([]);
   const [modalHabitanteAbierto, setModalHabitanteAbierto] = useState(false);
+
+  // Documentos digitales de respaldo (PDF e imagenes)
+  const [documentosAdjuntos, setDocumentosAdjuntos] = useState([]);
+  const [etiquetaDocTemp, setEtiquetaDocTemp] = useState('CI Titular');
 
   // Calculo automatico de servicios basicos
   const [multiplicarServiciosAutomatico, setMultiplicarServiciosAutomatico] = useState(true);
@@ -288,6 +299,27 @@ export function NuevoContrato({ onClose, onSave }) {
   const handleEliminarHabitante = (idTemp) => {
     setHabitantes(prev => prev.filter(h => h.id_temp !== idTemp));
     toast.success('Habitante eliminado de la lista');
+  };
+
+  // Manejo de seleccion de archivos PDF e imagenes de respaldo
+  const handleSeleccionarArchivos = (e) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+
+    const nuevos = files.map((file) => ({
+      id_temp: `${Date.now()}_${Math.random()}`,
+      file,
+      etiqueta: etiquetaDocTemp || file.name,
+      esPdf: file.type === 'application/pdf',
+    }));
+
+    setDocumentosAdjuntos((prev) => [...prev, ...nuevos]);
+    toast.success(`${files.length} archivo(s) preparado(s) para subir`);
+    e.target.value = '';
+  };
+
+  const handleQuitarDocumento = (idTemp) => {
+    setDocumentosAdjuntos((prev) => prev.filter((d) => d.id_temp !== idTemp));
   };
 
   const listaConceptosActivosOrdenados = useMemo(() => {
@@ -514,7 +546,7 @@ export function NuevoContrato({ onClose, onSave }) {
     }
 
     setIsSubmitting(true);
-    const toastId = toast.loading('Guardando contrato, inquilino y censo de habitantes...');
+    const toastId = toast.loading('Guardando contrato, inquilino, censo y respaldos...');
 
     try {
       let idUsuarioFinal = inquilinoData.id_usuario;
@@ -542,28 +574,36 @@ export function NuevoContrato({ onClose, onSave }) {
 
       // 2. Registrar el contrato principal
       const conceptosIds = listaConceptosActivosOrdenados.map(c => c.id_concepto);
+      const conceptosDetalle = listaConceptosActivosOrdenados.map(c => ({
+        id_concepto: Number(c.id_concepto),
+        monto: Number(c.monto) || 0,
+      }));
+
+      // Extraer el monto especifico del alquiler (si existe) para monto_renta
+      const conceptoAlquiler = listaConceptosActivosOrdenados.find(c => {
+        const n = (c.nombre || '').toUpperCase();
+        return n.includes('ALQUILER') || n.includes('RENTA') || n.includes('CANON');
+      });
+      const montoSoloAlquiler = conceptoAlquiler ? Number(conceptoAlquiler.monto) : Number(totalMensualRecurrente);
 
       const payloadContrato = {
         id_departamento: Number(formData.id_departamento),
         id_usuario: Number(idUsuarioFinal),
         fecha_inicio: formData.fecha_inicio,
         fecha_fin: formData.fecha_fin,
-        monto_renta: Number(totalMensualRecurrente),
+        monto_renta: montoSoloAlquiler,
         moneda: formData.moneda,
         garantia: parseFloat(formData.garantia) || 0,
         numero_llaves: Number(formData.numero_llaves) || 1,
         estado: formData.tipo_contrato,
         conceptosIds: conceptosIds,
+        conceptosDetalle: conceptosDetalle,
       };
-
-      const dataContrato = await crearContrato(payloadContrato);
-      const nuevoIdContrato = dataContrato.id_contrato || dataContrato.id;
 
       // 3. Registrar censo completo en la tabla habitantes (Titular + Dependientes)
       if (nuevoIdContrato) {
         const listaCenso = [];
 
-        // Si no es contrato para terceros, el titular tambien reside en la unidad
         if (formData.tipo_contrato !== 'TERCEROS') {
           listaCenso.push({
             id_contrato: Number(nuevoIdContrato),
@@ -580,7 +620,6 @@ export function NuevoContrato({ onClose, onSave }) {
           });
         }
 
-        // Agregar dependientes u ocupantes reales registrados
         habitantes.forEach(h => {
           listaCenso.push({
             id_contrato: Number(nuevoIdContrato),
@@ -600,10 +639,15 @@ export function NuevoContrato({ onClose, onSave }) {
         if (listaCenso.length > 0) {
           await registrarHabitantesBatch(listaCenso);
         }
+
+        // 4. Subir documentos digitales de respaldo (PDF e imagenes) si se adjuntaron
+        if (documentosAdjuntos.length > 0) {
+          await subirDocumentosContrato(nuevoIdContrato, documentosAdjuntos);
+        }
       }
 
       generarPDFContrato();
-      toast.success('Contrato y censo de habitantes registrados exitosamente', { id: toastId });
+      toast.success('Contrato, censo y documentos registrados exitosamente', { id: toastId });
 
       if (onSave) onSave(dataContrato);
       if (onClose) onClose();
@@ -625,7 +669,7 @@ export function NuevoContrato({ onClose, onSave }) {
           </div>
           <div>
             <h2 className="text-xl font-extrabold">Registrar Nuevo Contrato</h2>
-            <p className="text-sm text-slate-400">Inquilino, entrega de llaves, censo de habitantes y desglose financiero</p>
+            <p className="text-sm text-slate-400">Inquilino, entrega de llaves, censo de habitantes y respaldos digitales</p>
           </div>
         </div>
 
@@ -1015,6 +1059,82 @@ export function NuevoContrato({ onClose, onSave }) {
           )}
         </div>
 
+        {/* 7. DOCUMENTOS DE RESPALDO (CARNETS, CONTRATO ESCANEADO, INVENTARIO) */}
+        <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50/50">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
+            <div>
+              <h3 className="text-base font-extrabold text-slate-800 flex items-center gap-2">
+                <Paperclip size={18} className="text-blue-600" /> Documentos de Respaldo (Opcional)
+              </h3>
+              <p className="text-xs text-slate-500">
+                Adjunta carnets de identidad, contrato firmado escaneado o inventarios en formato PDF o imagen
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-600 mb-1">Tipo de Documento</label>
+              <select
+                value={etiquetaDocTemp}
+                onChange={(e) => setEtiquetaDocTemp(e.target.value)}
+                className="w-full py-2.5 px-3 border border-slate-300 rounded-xl text-sm font-bold bg-white outline-none focus:border-blue-600 cursor-pointer"
+              >
+                <option value="CI Titular">CI Titular</option>
+                <option value="CI Habitante / Ocupante">CI Habitante / Ocupante</option>
+                <option value="Contrato Firmado Escaneado">Contrato Firmado Escaneado</option>
+                <option value="Acta de Entrega / Inventario">Acta de Entrega / Inventario</option>
+                <option value="Comprobante Garantia">Comprobante Garantia</option>
+                <option value="Otro Respaldo">Otro Respaldo</option>
+              </select>
+            </div>
+
+            <div className="sm:col-span-2 flex items-end">
+              <label className="w-full flex items-center justify-center gap-2 py-2.5 px-4 border-2 border-dashed border-blue-300 bg-blue-50/50 hover:bg-blue-50 text-blue-700 rounded-xl text-sm font-bold cursor-pointer transition-colors">
+                <FileUp size={18} />
+                <span>Seleccionar Archivo PDF o Imagen (JPG, PNG)</span>
+                <input
+                  type="file"
+                  multiple
+                  accept=".pdf,image/*"
+                  onChange={handleSeleccionarArchivos}
+                  className="hidden"
+                />
+              </label>
+            </div>
+          </div>
+
+          {documentosAdjuntos.length > 0 && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              {documentosAdjuntos.map((doc) => (
+                <div
+                  key={doc.id_temp}
+                  className="flex items-center justify-between bg-white p-3 rounded-xl border border-slate-200 shadow-sm"
+                >
+                  <div className="flex items-center gap-2.5 min-w-0 pr-2">
+                    <div className={`p-2 rounded-lg shrink-0 ${doc.esPdf ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+                      {doc.esPdf ? <FileText size={16} /> : <ImageIcon size={16} />}
+                    </div>
+                    <div className="min-w-0">
+                      <span className="inline-block px-2 py-0.5 text-[10px] font-extrabold rounded bg-slate-100 text-slate-700 uppercase mb-0.5">
+                        {doc.etiqueta}
+                      </span>
+                      <p className="text-xs font-semibold text-slate-700 truncate">{doc.file.name}</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleQuitarDocumento(doc.id_temp)}
+                    className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer shrink-0"
+                  >
+                    <Trash2 size={15} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* RESUMEN TOTAL Y BOTON DE VISTA PREVIA */}
         <div className="flex flex-col sm:flex-row items-center justify-between p-5 bg-blue-50 border border-blue-200 rounded-2xl gap-4">
           <div>
@@ -1031,7 +1151,7 @@ export function NuevoContrato({ onClose, onSave }) {
           </button>
         </div>
 
-        {/* 7. VISTA PREVIA DE CUOTAS */}
+        {/* 8. VISTA PREVIA DE CUOTAS */}
         {mostrarVistaPrevia && (
           <div className="border border-blue-200 bg-blue-50/30 rounded-2xl p-6 animate-fade-in">
             <h3 className="text-base font-extrabold text-blue-900 mb-1">Vista Previa de Cuotas ({cobrosGenerados.length} en total)</h3>

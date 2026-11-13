@@ -8,18 +8,20 @@ import {
   X, 
   Home, 
   Building2, 
-  ArrowUpRight,
-  Wallet,
-  Clock,
-  Printer,
-  Lock,
-  CreditCard,
-  Sliders
+  ArrowUpRight, 
+  Wallet, 
+  Clock, 
+  Printer, 
+  Lock, 
+  CreditCard, 
+  Sliders, 
+  FileX2, 
+  AlertTriangle 
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
 import { listarCobros, pagarCobro } from '../../services/cobroPagoService';
-import { listarContratos } from '../../services/contratoService';
+import { listarContratos, finalizarContrato } from '../../services/contratoService';
 import { listarUsuarios } from '../../services/usuarioService';
 import { Recibo } from './Recibo';
 
@@ -41,6 +43,15 @@ const formatFechaDMY = (strFecha) => {
   }
 };
 
+// Obtener fecha local actual en formato YYYY-MM-DD
+const getHoyLocalISO = () => {
+  const hoy = new Date();
+  const y = hoy.getFullYear();
+  const m = String(hoy.getMonth() + 1).padStart(2, '0');
+  const d = String(hoy.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
 export function ListadoCobros() {
   const [loading, setLoading] = useState(true);
   const [cobros, setCobros] = useState([]);
@@ -58,6 +69,14 @@ export function ListadoCobros() {
 
   // Modal principal: Contrato activo en visualizacion
   const [contratoActivoId, setContratoActivoId] = useState(null);
+
+  // Fecha manual para emision de recibos
+  const [fechaReciboManual, setFechaReciboManual] = useState(getHoyLocalISO());
+
+  // Submodal: Finalizar contrato anticipadamente
+  const [modalFinalizarAbierto, setModalFinalizarAbierto] = useState(false);
+  const [fechaFinalizacion, setFechaFinalizacion] = useState(getHoyLocalISO());
+  const [finalizandoContrato, setFinalizandoContrato] = useState(false);
 
   // Submodal: Cobro individual y ajuste de excepcion
   const [cobroAPagar, setCobroAPagar] = useState(null);
@@ -164,7 +183,7 @@ export function ListadoCobros() {
 
   // Calculo consolidado por tarjeta de contrato
   const tarjetasContratos = useMemo(() => {
-    const hoyStr = new Date().toISOString().split('T')[0];
+    const hoyStr = getHoyLocalISO();
 
     return contratos.map(con => {
       const idContrato = con.id_contrato || con.id;
@@ -174,6 +193,7 @@ export function ListadoCobros() {
       const nombreEdificio = edInfo.nombre || 'Edificio';
       const direccionEdificio = edInfo.direccion || con.direccion || '';
       const nombreInquilino = usuariosMap[con.id_usuario] || 'Inquilino';
+      const estadoContrato = (con.estado || 'ACTIVO').toUpperCase();
 
       const cobrosContrato = cobros.filter(c => Number(c.id_contrato) === Number(idContrato));
 
@@ -212,6 +232,8 @@ export function ListadoCobros() {
       return {
         idContrato,
         contratoOriginal: con,
+        estadoContrato,
+        fechaFinContrato: con.fecha_fin ? String(con.fecha_fin).split('T')[0] : null,
         inquilino: nombreInquilino,
         idEdificio,
         edificio: nombreEdificio,
@@ -286,6 +308,30 @@ export function ListadoCobros() {
       }))
       .sort((a, b) => a.clave.localeCompare(b.clave));
   }, [contratoActivoId, cobros]);
+
+  // Procesar finalizacion anticipada del contrato
+  const handleConfirmarFinalizacion = async (e) => {
+    e.preventDefault();
+    if (!contratoActivo || !fechaFinalizacion) {
+      toast.error('Selecciona la fecha de conclusion del contrato');
+      return;
+    }
+
+    setFinalizandoContrato(true);
+    const toastId = toast.loading('Finalizando contrato y ajustando cartera de cobros...');
+
+    try {
+      await finalizarContrato(contratoActivo.idContrato, fechaFinalizacion);
+      toast.success('Contrato finalizado y cuotas futuras depuradas', { id: toastId });
+      setModalFinalizarAbierto(false);
+      await cargarDatos();
+    } catch (error) {
+      console.error('Error al finalizar contrato:', error);
+      toast.error(error.message || 'No se pudo finalizar el contrato', { id: toastId });
+    } finally {
+      setFinalizandoContrato(false);
+    }
+  };
 
   // Inicializacion del modal de pago individual
   const abrirFormPago = (cobro) => {
@@ -366,7 +412,6 @@ export function ListadoCobros() {
       const respuesta = await pagarCobro(idTarget, payload);
       const cobroActualizadoServidor = respuesta?.cobro;
 
-      // Actualizacion inmediata en memoria con los datos del backend
       setCobros(prevCobros => prevCobros.map(c => {
         if (Number(c.id_cobro || c.id) !== Number(idTarget)) return c;
 
@@ -441,7 +486,7 @@ export function ListadoCobros() {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h2 className="text-xl font-extrabold text-slate-800">Cartera de Cobros y Expensas</h2>
-          <p className="text-sm text-slate-500">Supervisa inquilinos, cobra cuotas y emite comprobantes oficiales al completar el periodo.</p>
+          <p className="text-sm text-slate-500">Supervisa inquilinos, cobra cuotas, finaliza contratos y emite comprobantes oficiales.</p>
         </div>
       </div>
 
@@ -546,11 +591,15 @@ export function ListadoCobros() {
           {tarjetasFiltradas.map(card => {
             const esMora = card.estadoSemaforo === 'MORA';
             const esAlDia = card.estadoSemaforo === 'AL_DIA';
+            const esFinalizado = card.estadoContrato === 'FINALIZADO';
 
             return (
               <div
                 key={card.idContrato}
-                onClick={() => setContratoActivoId(card.idContrato)}
+                onClick={() => {
+                  setContratoActivoId(card.idContrato);
+                  setFechaReciboManual(getHoyLocalISO());
+                }}
                 className={`border rounded-2xl p-5 cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 bg-white relative flex flex-col justify-between ${
                   esMora 
                     ? 'border-red-200 hover:border-red-400' 
@@ -561,18 +610,26 @@ export function ListadoCobros() {
               >
                 <div>
                   <div className="flex items-center justify-between gap-2 mb-3">
-                    <span className={`px-2.5 py-1 text-xs font-extrabold rounded-lg border flex items-center gap-1.5 ${
-                      esMora 
-                        ? 'bg-red-50 text-red-700 border-red-200' 
-                        : esAlDia 
-                        ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                        : 'bg-amber-50 text-amber-700 border-amber-200'
-                    }`}>
-                      <span className={`w-2 h-2 rounded-full ${
-                        esMora ? 'bg-red-600 animate-pulse' : esAlDia ? 'bg-emerald-500' : 'bg-amber-500'
-                      }`} />
-                      {esMora ? 'En Mora' : esAlDia ? 'Al Dia' : 'Pendiente'}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className={`px-2.5 py-1 text-xs font-extrabold rounded-lg border flex items-center gap-1.5 ${
+                        esMora 
+                          ? 'bg-red-50 text-red-700 border-red-200' 
+                          : esAlDia 
+                          ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                          : 'bg-amber-50 text-amber-700 border-amber-200'
+                      }`}>
+                        <span className={`w-2 h-2 rounded-full ${
+                          esMora ? 'bg-red-600 animate-pulse' : esAlDia ? 'bg-emerald-500' : 'bg-amber-500'
+                        }`} />
+                        {esMora ? 'En Mora' : esAlDia ? 'Al Dia' : 'Pendiente'}
+                      </span>
+
+                      {esFinalizado && (
+                        <span className="px-2 py-1 text-[10px] font-extrabold rounded-lg bg-slate-800 text-white uppercase">
+                          Finalizado
+                        </span>
+                      )}
+                    </div>
 
                     <span className="text-xs font-extrabold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100 flex items-center gap-1">
                       <Home size={13} /> Depto {card.deptoNumero}
@@ -647,32 +704,54 @@ export function ListadoCobros() {
           <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-4xl overflow-hidden max-h-[90vh] flex flex-col animate-scale-up">
             
             {/* Cabecera modal */}
-            <div className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between shrink-0">
+            <div className="bg-slate-900 px-6 py-4 text-white flex flex-wrap items-center justify-between gap-3 shrink-0">
               <div className="flex items-center gap-3">
                 <div className="p-2.5 bg-blue-600 rounded-xl">
                   <Wallet size={20} />
                 </div>
                 <div>
-                  <h3 className="font-extrabold text-base flex items-center gap-2">
-                    Cobranzas - {contratoActivo.inquilino}
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-extrabold text-base">
+                      Cobranzas - {contratoActivo.inquilino}
+                    </h3>
+                    {contratoActivo.estadoContrato === 'FINALIZADO' && (
+                      <span className="px-2 py-0.5 text-[10px] font-black bg-red-500/20 text-red-200 border border-red-400/40 rounded-md uppercase">
+                        Finalizado ({formatFechaDMY(contratoActivo.fechaFinContrato)})
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-slate-400">
                     {contratoActivo.edificio} • Piso {contratoActivo.deptoPiso} Depto {contratoActivo.deptoNumero} {contratoActivo.deptoBloque ? `(Bloque ${contratoActivo.deptoBloque})` : ''}
                   </p>
                 </div>
               </div>
 
-              <button 
-                type="button"
-                onClick={() => setContratoActivoId(null)} 
-                className="text-slate-400 hover:text-white p-1 rounded-lg transition-colors cursor-pointer"
-              >
-                <X size={20} />
-              </button>
+              <div className="flex items-center gap-2">
+                {contratoActivo.estadoContrato !== 'FINALIZADO' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setFechaFinalizacion(getHoyLocalISO());
+                      setModalFinalizarAbierto(true);
+                    }}
+                    className="px-3.5 py-1.5 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                  >
+                    <FileX2 size={15} /> Finalizar Contrato
+                  </button>
+                )}
+
+                <button 
+                  type="button"
+                  onClick={() => setContratoActivoId(null)} 
+                  className="text-slate-400 hover:text-white p-1.5 rounded-lg transition-colors cursor-pointer"
+                >
+                  <X size={20} />
+                </button>
+              </div>
             </div>
 
-            {/* Resumen superior */}
-            <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 grid grid-cols-1 sm:grid-cols-3 gap-4 shrink-0">
+            {/* Resumen superior con selector manual de Fecha del Recibo al lado del Saldo */}
+            <div className="bg-slate-50 border-b border-slate-200 px-6 py-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 shrink-0">
               <div className="p-3 bg-white border border-slate-200 rounded-xl">
                 <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider block">Total Pagado</span>
                 <p className="text-lg font-black text-emerald-600 mt-0.5">
@@ -685,6 +764,19 @@ export function ListadoCobros() {
                 <p className={`text-lg font-black mt-0.5 ${contratoActivo.totalDeuda > 0 ? 'text-red-600' : 'text-slate-800'}`}>
                   {contratoActivo.totalDeuda.toFixed(2)} <span className="text-xs font-bold text-slate-400">{contratoActivo.moneda}</span>
                 </p>
+              </div>
+
+              {/* Selector manual de fecha para impresion de recibo */}
+              <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl">
+                <label className="text-[11px] font-extrabold text-blue-800 uppercase tracking-wider flex items-center gap-1 mb-1">
+                  <Calendar size={12} /> Fecha del Recibo
+                </label>
+                <input
+                  type="date"
+                  value={fechaReciboManual}
+                  onChange={(e) => setFechaReciboManual(e.target.value)}
+                  className="w-full py-1 px-2 bg-white border border-blue-300 rounded-lg text-xs font-extrabold text-slate-800 outline-none focus:border-blue-600 cursor-pointer"
+                />
               </div>
 
               <div className="p-3 bg-white border border-slate-200 rounded-xl">
@@ -722,7 +814,8 @@ export function ListadoCobros() {
                             type="button"
                             onClick={() => setReciboData({
                               contrato: contratoActivo,
-                              grupo
+                              grupo,
+                              fechaEmision: fechaReciboManual
                             })}
                             className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
                           >
@@ -846,6 +939,78 @@ export function ListadoCobros() {
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ================= SUBMODAL FINALIZAR CONTRATO ================= */}
+      {modalFinalizarAbierto && contratoActivo && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-100 animate-scale-up">
+            <div className="bg-red-600 px-6 py-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <AlertTriangle size={20} />
+                <h3 className="font-extrabold text-base">Finalizar Contrato</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalFinalizarAbierto(false)}
+                className="text-red-100 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleConfirmarFinalizacion} className="p-6 space-y-4">
+              <p className="text-xs text-slate-600 leading-relaxed">
+                Estas a punto de concluir el contrato de <strong className="text-slate-900">{contratoActivo.inquilino}</strong> (Depto {contratoActivo.deptoNumero}).
+              </p>
+
+              <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1">
+                <p className="font-bold">Al confirmar esta accion:</p>
+                <ul className="list-disc pl-4 space-y-0.5">
+                  <li>Se contabilizaran cuotas unicamente hasta el mes de la fecha indicada.</li>
+                  <li>Las cuotas pendientes de meses posteriores seran eliminadas.</li>
+                  <li>El departamento pasara a estado <strong>DISPONIBLE</strong>.</li>
+                </ul>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
+                  Fecha de Conclusion del Contrato *
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={fechaFinalizacion}
+                  onChange={(e) => setFechaFinalizacion(e.target.value)}
+                  className="w-full py-2.5 px-3.5 border-2 border-slate-200 rounded-xl text-sm font-extrabold text-slate-900 outline-none focus:border-red-600"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setModalFinalizarAbierto(false)}
+                  className="px-4 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-100 text-xs cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={finalizandoContrato}
+                  className="px-5 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold rounded-xl shadow-lg shadow-red-600/20 text-xs disabled:opacity-50 flex items-center gap-1.5 cursor-pointer"
+                >
+                  {finalizandoContrato ? (
+                    <>
+                      <Loader2 size={15} className="animate-spin" /> Procesando...
+                    </>
+                  ) : (
+                    'Confirmar Finalizacion'
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
