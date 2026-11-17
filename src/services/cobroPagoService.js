@@ -49,3 +49,27 @@ export async function listarPagosPorCobro(idCobro) {
   });
   return handleResponse(res);
 }
+
+export async function actualizarCobrosLote(items) {
+  const res = await fetch(`${BASE_URL}/cobros/actualizar-lote`, {
+    method: 'PATCH',
+    headers: getAuthHeaders(),
+    body: JSON.stringify({ items }),
+  });
+  return handleResponse(res);
+}
+
+export async function subirReciboPdfCloudinary(pdfBlob, nombreArchivo) {
+  const formData = new FormData();
+  formData.append('recibo', pdfBlob, nombreArchivo);
+
+  const headers = getAuthHeaders();
+  delete headers['Content-Type'];
+
+  const res = await fetch(`${BASE_URL}/cobros/subir-recibo-pdf`, {
+    method: 'POST',
+    headers,
+    body: formData,
+  });
+  return handleResponse(res);
+}

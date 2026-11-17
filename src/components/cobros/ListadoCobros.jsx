@@ -13,17 +13,23 @@ import {
   Clock, 
   Printer, 
   Lock, 
+  Unlock,
   CreditCard, 
   Sliders, 
   FileX2, 
-  AlertTriangle 
+  AlertTriangle,
+  MessageCircle,
+  Edit3,
+  Save,
+  Phone
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
-import { listarCobros, pagarCobro } from '../../services/cobroPagoService';
+import { listarCobros, pagarCobro, actualizarCobrosLote, subirReciboPdfCloudinary } from '../../services/cobroPagoService';
 import { listarContratos, finalizarContrato } from '../../services/contratoService';
 import { listarUsuarios } from '../../services/usuarioService';
 import { Recibo } from './Recibo';
+import { descargarReciboPDF } from './generarReciboPDF';
 
 const MESES = [
   '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
@@ -50,6 +56,40 @@ const getHoyLocalISO = () => {
   const m = String(hoy.getMonth() + 1).padStart(2, '0');
   const d = String(hoy.getDate()).padStart(2, '0');
   return `${y}-${m}-${d}`;
+};
+
+// Calculo del dia limite de pago segun la fecha de inicio del contrato (regla del multiplo de 5)
+const calcularDiaLimiteContrato = (fechaInicioStr) => {
+  if (!fechaInicioStr) return 5;
+  try {
+    const soloFecha = String(fechaInicioStr).split('T')[0];
+    const [y, m, d] = soloFecha.split('-').map(Number);
+    if (!y || !m || !d) return 5;
+
+    if (d >= 30) return 5;
+    const diasEnElMes = new Date(y, m, 0).getDate();
+    let diaFin = Math.ceil(d / 5) * 5;
+    if (diaFin === d) diaFin = d + 5;
+    if (diaFin > diasEnElMes) diaFin = diasEnElMes;
+    return diaFin;
+  } catch (e) {
+    return 5;
+  }
+};
+
+// Obtener fecha de vencimiento real en formato YYYY-MM-DD para una cuota
+const getFechaVencimientoRealISO = (cobro, fechaInicioContratoStr) => {
+  const mes = Number(cobro.periodo_mes);
+  const anio = Number(cobro.periodo_anio);
+
+  if (mes && anio && fechaInicioContratoStr) {
+    const diaLimite = calcularDiaLimiteContrato(fechaInicioContratoStr);
+    const ultimoDiaMes = new Date(anio, mes, 0).getDate();
+    const diaFinal = Math.min(diaLimite, ultimoDiaMes);
+    return `${anio}-${String(mes).padStart(2, '0')}-${String(diaFinal).padStart(2, '0')}`;
+  }
+
+  return cobro.fecha_vencimiento ? String(cobro.fecha_vencimiento).split('T')[0] : null;
 };
 
 export function ListadoCobros() {
@@ -97,6 +137,16 @@ export function ListadoCobros() {
 
   // Estado para impresion de recibo
   const [reciboData, setReciboData] = useState(null);
+
+  // Estados para envio por WhatsApp
+  const [modalWhatsappData, setModalWhatsappData] = useState(null);
+  const [subiendoPdfWhatsapp, setSubiendoPdfWhatsapp] = useState(false);
+
+  // Estados para desbloquear y editar precios de un mes
+  const [mesEditandoClave, setMesEditandoClave] = useState(null);
+  const [montosEditadosMap, setMontosEditadosMap] = useState({});
+  const [motivoEdicionMes, setMotivoEdicionMes] = useState('');
+  const [guardandoEdicionMes, setGuardandoEdicionMes] = useState(false);
 
   useEffect(() => {
     cargarDatos();
@@ -161,12 +211,15 @@ export function ListadoCobros() {
       }
       setDepartamentosMap(mapDep);
 
-      // Mapeo de usuarios
+      // Mapeo de usuarios (nombre + telefono para WhatsApp)
       const mapUsr = {};
       if (Array.isArray(dataUsers)) {
         dataUsers.forEach(u => {
           const nombre = `${u.nombre || ''} ${u.primer_apellido || ''} ${u.segundo_apellido || ''}`.trim();
-          mapUsr[u.id_usuario || u.id] = nombre || 'Inquilino';
+          mapUsr[u.id_usuario || u.id] = {
+            nombre: nombre || 'Inquilino',
+            telefono: u.telefono || u.celular || ''
+          };
         });
       }
       setUsuariosMap(mapUsr);
@@ -192,7 +245,9 @@ export function ListadoCobros() {
       const edInfo = edificiosMap[idEdificio] || {};
       const nombreEdificio = edInfo.nombre || 'Edificio';
       const direccionEdificio = edInfo.direccion || con.direccion || '';
-      const nombreInquilino = usuariosMap[con.id_usuario] || 'Inquilino';
+      const usrInfo = usuariosMap[con.id_usuario] || {};
+      const nombreInquilino = usrInfo.nombre || 'Inquilino';
+      const telefonoInquilino = con.telefono || usrInfo.telefono || '';
       const estadoContrato = (con.estado || 'ACTIVO').toUpperCase();
 
       const cobrosContrato = cobros.filter(c => Number(c.id_contrato) === Number(idContrato));
@@ -207,7 +262,7 @@ export function ListadoCobros() {
         const monto = Number(c.monto || 0);
         const esPagado = (c.estado || '').toUpperCase() === 'PAGADO';
         const saldo = esPagado ? 0 : Math.max(0, Number(c.saldo_pendiente ?? monto));
-        const fechaVenc = c.fecha_vencimiento ? String(c.fecha_vencimiento).split('T')[0] : null;
+        const fechaVenc = getFechaVencimientoRealISO(c, con.fecha_inicio);
 
         if (esPagado) {
           totalPagado += monto;
@@ -235,6 +290,7 @@ export function ListadoCobros() {
         estadoContrato,
         fechaFinContrato: con.fecha_fin ? String(con.fecha_fin).split('T')[0] : null,
         inquilino: nombreInquilino,
+        telefonoInquilino,
         idEdificio,
         edificio: nombreEdificio,
         direccion_edificio: direccionEdificio,
@@ -308,6 +364,181 @@ export function ListadoCobros() {
       }))
       .sort((a, b) => a.clave.localeCompare(b.clave));
   }, [contratoActivoId, cobros]);
+
+  // Abrir modal de WhatsApp
+  const abrirModalWhatsapp = (grupo) => {
+    if (!contratoActivo) return;
+
+    const lineasConceptos = grupo.items.map(it => {
+      const nombre = conceptosMap[it.id_concepto] || it.descripcion || 'Concepto';
+      const monto = Number(it.monto || 0).toFixed(2);
+      const nota = it.motivo_ajuste ? ` (${it.motivo_ajuste})` : '';
+      return `• ${nombre}: ${monto} ${it.moneda || contratoActivo.moneda}${nota}`;
+    }).join('\n');
+
+    const estadoTexto = grupo.estaCompletamentePagado 
+      ? 'RECIBO DE PAGO CANCELADO' 
+      : 'DETALLE DE COBRO DEL PERIODO';
+
+    const mensajeArmado = 
+      `*${estadoTexto}*\n` +
+      `Inquilino: ${contratoActivo.inquilino}\n` +
+      `Inmueble: ${contratoActivo.edificio} - Depto ${contratoActivo.deptoNumero}\n` +
+      `Periodo: *${grupo.nombrePeriodo}*\n` +
+      `Fecha emision: ${formatFechaDMY(fechaReciboManual)}\n\n` +
+      `*Detalle:*\n${lineasConceptos}\n\n` +
+      `*Total del periodo:* ${grupo.totalMonto.toFixed(2)} ${contratoActivo.moneda}` +
+      (!grupo.estaCompletamentePagado ? `\n*Saldo pendiente:* ${grupo.totalSaldo.toFixed(2)} ${contratoActivo.moneda}` : '');
+
+    setModalWhatsappData({
+      grupo,
+      telefono: contratoActivo.telefonoInquilino || '',
+      mensaje: mensajeArmado
+    });
+  };
+
+  // Enviar solo texto a WhatsApp Web / App
+  const handleEnviarWhatsapp = (e) => {
+    e.preventDefault();
+    if (!modalWhatsappData) return;
+
+    const soloDigitos = String(modalWhatsappData.telefono || '').replace(/\D/g, '');
+    if (!soloDigitos || soloDigitos.length < 7) {
+      toast.error('Ingresa un numero de celular valido');
+      return;
+    }
+
+    const numeroConCodigo = soloDigitos.length === 8 ? `591${soloDigitos}` : soloDigitos;
+    const url = `https://wa.me/${numeroConCodigo}?text=${encodeURIComponent(modalWhatsappData.mensaje)}`;
+    
+    window.open(url, '_blank', 'noopener,noreferrer');
+    setModalWhatsappData(null);
+  };
+
+  // Subir recibo PDF a Cloudinary y abrir WhatsApp con el enlace directo
+  const handleEnviarPdfCloudinaryWhatsapp = async () => {
+    if (!modalWhatsappData || !contratoActivo) return;
+
+    const soloDigitos = String(modalWhatsappData.telefono || '').replace(/\D/g, '');
+    if (!soloDigitos || soloDigitos.length < 7) {
+      toast.error('Ingresa un numero de celular valido');
+      return;
+    }
+
+    setSubiendoPdfWhatsapp(true);
+    const toastId = toast.loading('Generando recibo PDF y subiendo a la nube...');
+
+    try {
+      const { blob, nombreArchivo } = descargarReciboPDF({
+        contrato: contratoActivo,
+        grupo: modalWhatsappData.grupo,
+        fechaEmision: fechaReciboManual,
+        conceptosMap,
+        soloBlob: true,
+      });
+
+      const respuesta = await subirReciboPdfCloudinary(blob, nombreArchivo);
+      const urlPdf = respuesta?.url;
+
+      if (!urlPdf) {
+        throw new Error('El servidor no devolvio el enlace del PDF');
+      }
+
+      const mensajeConEnlace = `${modalWhatsappData.mensaje}\n\n*Descargar Recibo Oficial (PDF):*\n${urlPdf}`;
+      const numeroConCodigo = soloDigitos.length === 8 ? `591${soloDigitos}` : soloDigitos;
+      const urlWhatsapp = `https://wa.me/${numeroConCodigo}?text=${encodeURIComponent(mensajeConEnlace)}`;
+
+      toast.success('Recibo listo. Abriendo WhatsApp...', { id: toastId });
+      window.open(urlWhatsapp, '_blank', 'noopener,noreferrer');
+      setModalWhatsappData(null);
+    } catch (error) {
+      console.error('Error al generar y subir recibo PDF:', error);
+      toast.error(error.message || 'No se pudo subir el recibo PDF', { id: toastId });
+    } finally {
+      setSubiendoPdfWhatsapp(false);
+    }
+  };
+
+  // Desbloquear edicion de precios de un mes
+  const activarEdicionMes = (grupo) => {
+    const inicial = {};
+    grupo.items.forEach(it => {
+      if (!it.esPagado) {
+        const id = it.id_cobro || it.id;
+        inicial[id] = String(Number(it.monto || 0));
+      }
+    });
+    setMontosEditadosMap(inicial);
+    setMotivoEdicionMes('');
+    setMesEditandoClave(grupo.clave);
+  };
+
+  const cancelarEdicionMes = () => {
+    setMesEditandoClave(null);
+    setMontosEditadosMap({});
+    setMotivoEdicionMes('');
+  };
+
+  // Guardar nuevos montos modificados del mes
+  const handleGuardarEdicionMes = async (grupo) => {
+    const itemsParaActualizar = [];
+
+    for (const it of grupo.items) {
+      if (it.esPagado) continue;
+      const id = it.id_cobro || it.id;
+      const nuevoValor = Number(montosEditadosMap[id]);
+
+      if (isNaN(nuevoValor) || nuevoValor < 0) {
+        toast.error('Todos los montos editados deben ser numeros validos');
+        return;
+      }
+
+      if (nuevoValor !== Number(it.monto)) {
+        itemsParaActualizar.push({
+          id_cobro: Number(id),
+          monto: nuevoValor,
+          motivo_ajuste: motivoEdicionMes.trim() || 'Ajuste por visitas / consumo adicional'
+        });
+      }
+    }
+
+    if (itemsParaActualizar.length === 0) {
+      cancelarEdicionMes();
+      return;
+    }
+
+    setGuardandoEdicionMes(true);
+    const toastId = toast.loading('Actualizando precios del mes...');
+
+    try {
+      await actualizarCobrosLote(itemsParaActualizar);
+
+      const mapaActualizados = new Map(
+        itemsParaActualizar.map(item => [Number(item.id_cobro), item])
+      );
+
+      setCobros(prev => prev.map(c => {
+        const id = Number(c.id_cobro || c.id);
+        const mod = mapaActualizados.get(id);
+        if (!mod) return c;
+        return {
+          ...c,
+          monto: mod.monto,
+          saldo_pendiente: mod.monto,
+          monto_original: c.monto_original || c.monto,
+          motivo_ajuste: mod.motivo_ajuste
+        };
+      }));
+
+      toast.success('Tarifas del mes actualizadas correctamente', { id: toastId });
+      cancelarEdicionMes();
+    } catch (error) {
+      console.error('Error actualizando montos del mes:', error);
+      toast.error(error.message || 'No se pudieron guardar los nuevos montos', { id: toastId });
+    } finally {
+      setGuardandoEdicionMes(false);
+    }
+  };
 
   // Procesar finalizacion anticipada del contrato
   const handleConfirmarFinalizacion = async (e) => {
@@ -599,6 +830,7 @@ export function ListadoCobros() {
                 onClick={() => {
                   setContratoActivoId(card.idContrato);
                   setFechaReciboManual(getHoyLocalISO());
+                  cancelarEdicionMes();
                 }}
                 className={`border rounded-2xl p-5 cursor-pointer transition-all duration-200 hover:shadow-lg hover:-translate-y-0.5 bg-white relative flex flex-col justify-between ${
                   esMora 
@@ -742,7 +974,10 @@ export function ListadoCobros() {
 
                 <button 
                   type="button"
-                  onClick={() => setContratoActivoId(null)} 
+                  onClick={() => {
+                    setContratoActivoId(null);
+                    cancelarEdicionMes();
+                  }} 
                   className="text-slate-400 hover:text-white p-1.5 rounded-lg transition-colors cursor-pointer"
                 >
                   <X size={20} />
@@ -790,137 +1025,228 @@ export function ListadoCobros() {
             {/* Listado de cuotas por periodo */}
             <div className="p-6 overflow-y-auto flex-1 space-y-6">
               {gruposMensualesContrato.length > 0 ? (
-                gruposMensualesContrato.map((grupo) => (
-                  <div key={grupo.clave} className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
-                    
-                    <div className="bg-slate-50 px-5 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
-                      <div className="flex items-center gap-2.5">
-                        <Calendar size={18} className="text-blue-600" />
-                        <span className="font-extrabold text-slate-800 text-sm">{grupo.nombrePeriodo}</span>
-                        {grupo.estaCompletamentePagado ? (
-                          <span className="bg-emerald-100 text-emerald-800 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
-                            <CheckCircle2 size={12} /> Periodo Cancelado
-                          </span>
-                        ) : (
-                          <span className="bg-amber-100 text-amber-800 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border border-amber-300 flex items-center gap-1">
-                            <Clock size={12} /> Saldo: {grupo.totalSaldo.toFixed(2)} {contratoActivo.moneda}
-                          </span>
-                        )}
-                      </div>
+                gruposMensualesContrato.map((grupo) => {
+                  const estaEditandoEsteMes = mesEditandoClave === grupo.clave;
+                  const tieneItemsPendientes = grupo.items.some(it => !it.esPagado);
 
-                      <div>
-                        {grupo.estaCompletamentePagado ? (
+                  return (
+                    <div key={grupo.clave} className="border border-slate-200 rounded-2xl overflow-hidden bg-white shadow-sm">
+                      
+                      <div className="bg-slate-50 px-5 py-3 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                        <div className="flex items-center gap-2.5">
+                          <Calendar size={18} className="text-blue-600" />
+                          <span className="font-extrabold text-slate-800 text-sm">{grupo.nombrePeriodo}</span>
+                          {grupo.estaCompletamentePagado ? (
+                            <span className="bg-emerald-100 text-emerald-800 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border border-emerald-300 flex items-center gap-1">
+                              <CheckCircle2 size={12} /> Periodo Cancelado
+                            </span>
+                          ) : (
+                            <span className="bg-amber-100 text-amber-800 text-[11px] font-extrabold px-2.5 py-0.5 rounded-full border border-amber-300 flex items-center gap-1">
+                              <Clock size={12} /> Saldo: {grupo.totalSaldo.toFixed(2)} {contratoActivo.moneda}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Botones de accion del periodo: Desbloquear Edicion, WhatsApp e Imprimir Recibo */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          
+                          {/* 1. Boton Desbloquear / Modificar precios del mes */}
+                          {tieneItemsPendientes && (
+                            !estaEditandoEsteMes ? (
+                              <button
+                                type="button"
+                                onClick={() => activarEdicionMes(grupo)}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                                title="Desbloquear precios de este mes para recargos por visitas o consumo extra"
+                              >
+                                <Unlock size={13} /> Modificar Cobros
+                              </button>
+                            ) : (
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleGuardarEdicionMes(grupo)}
+                                  disabled={guardandoEdicionMes}
+                                  className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-sm transition-colors cursor-pointer disabled:opacity-50"
+                                >
+                                  {guardandoEdicionMes ? <Loader2 size={13} className="animate-spin" /> : <Save size={13} />}
+                                  Guardar Precios
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={cancelarEdicionMes}
+                                  disabled={guardandoEdicionMes}
+                                  className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold cursor-pointer"
+                                >
+                                  Cancelar
+                                </button>
+                              </div>
+                            )
+                          )}
+
+                          {/* 2. Boton Enviar por WhatsApp */}
                           <button
                             type="button"
-                            onClick={() => setReciboData({
-                              contrato: contratoActivo,
-                              grupo,
-                              fechaEmision: fechaReciboManual
-                            })}
-                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
+                            onClick={() => abrirModalWhatsapp(grupo)}
+                            className="flex items-center gap-1.5 px-3 py-1.5 bg-[#25D366]/15 hover:bg-[#25D366]/25 text-emerald-800 border border-[#25D366]/40 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                            title="Enviar detalle o recibo por WhatsApp"
                           >
-                            <Printer size={14} /> Imprimir Recibo
+                            <MessageCircle size={14} className="text-[#128C7E]" /> WhatsApp
                           </button>
-                        ) : (
-                          <div 
-                            className="flex items-center gap-1.5 px-3.5 py-1.5 bg-slate-100 border border-slate-200 text-slate-400 rounded-xl text-xs font-bold cursor-not-allowed select-none"
-                            title="Todos los conceptos de este periodo deben estar cancelados para emitir recibo"
-                          >
-                            <Lock size={13} className="text-slate-400" /> Recibo Bloqueado
-                          </div>
-                        )}
+
+                          {/* 3. Boton Imprimir Recibo */}
+                          {grupo.estaCompletamentePagado ? (
+                            <button
+                              type="button"
+                              onClick={() => setReciboData({
+                                contrato: contratoActivo,
+                                grupo,
+                                fechaEmision: fechaReciboManual
+                              })}
+                              className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
+                            >
+                              <Printer size={14} /> Imprimir Recibo
+                            </button>
+                          ) : (
+                            <div 
+                              className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-100 border border-slate-200 text-slate-400 rounded-xl text-xs font-bold cursor-not-allowed select-none"
+                              title="Todos los conceptos de este periodo deben estar cancelados para emitir recibo"
+                            >
+                              <Lock size={13} className="text-slate-400" /> Recibo Bloqueado
+                            </div>
+                          )}
+                        </div>
                       </div>
-                    </div>
 
-                    <table className="w-full text-left border-collapse">
-                      <thead>
-                        <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-white">
-                          <th className="py-2.5 px-4">Concepto</th>
-                          <th className="py-2.5 px-4">Monto</th>
-                          <th className="py-2.5 px-4">Limite</th>
-                          <th className="py-2.5 px-4">Estado</th>
-                          <th className="py-2.5 px-4 text-right">Accion</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100 text-sm">
-                        {grupo.items.map((cobro) => {
-                          const id = cobro.id_cobro || cobro.id;
-                          const esPagado = cobro.esPagado;
-                          const monto = Number(cobro.monto || 0);
-                          const saldo = cobro.saldoCalculado;
-                          const conceptoNombre = conceptosMap[cobro.id_concepto] || cobro.descripcion || 'Alquiler';
-                          const tieneAjuste = Boolean(cobro.motivo_ajuste || cobro.monto_original);
+                      {/* Barra de motivo cuando el mes esta desbloqueado para edicion */}
+                      {estaEditandoEsteMes && (
+                        <div className="bg-amber-50/80 border-b border-amber-200 px-5 py-2.5 flex flex-col sm:flex-row sm:items-center gap-2">
+                          <span className="text-xs font-extrabold text-amber-900 flex items-center gap-1.5 shrink-0">
+                            <Edit3 size={14} /> Motivo del cambio:
+                          </span>
+                          <input
+                            type="text"
+                            placeholder="Ej. Visitas familiares (2 personas extra en agua y luz)..."
+                            value={motivoEdicionMes}
+                            onChange={(e) => setMotivoEdicionMes(e.target.value)}
+                            className="flex-1 py-1.5 px-3 bg-white border border-amber-300 rounded-lg text-xs font-semibold text-slate-800 outline-none focus:border-blue-600"
+                          />
+                        </div>
+                      )}
 
-                          return (
-                            <tr key={id} className="hover:bg-slate-50/50 transition-colors">
-                              <td className="py-3 px-4">
-                                <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
-                                  {conceptoNombre}
-                                  {tieneAjuste && (
-                                    <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-blue-100 text-blue-800 border border-blue-200">
-                                      Ajustado
+                      <table className="w-full text-left border-collapse">
+                        <thead>
+                          <tr className="border-b border-slate-100 text-[11px] font-bold text-slate-400 uppercase tracking-wider bg-white">
+                            <th className="py-2.5 px-4">Concepto</th>
+                            <th className="py-2.5 px-4">Monto</th>
+                            <th className="py-2.5 px-4">Limite</th>
+                            <th className="py-2.5 px-4">Estado</th>
+                            <th className="py-2.5 px-4 text-right">Accion</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 text-sm">
+                          {grupo.items.map((cobro) => {
+                            const id = cobro.id_cobro || cobro.id;
+                            const esPagado = cobro.esPagado;
+                            const monto = Number(cobro.monto || 0);
+                            const saldo = cobro.saldoCalculado;
+                            const conceptoNombre = conceptosMap[cobro.id_concepto] || cobro.descripcion || 'Alquiler';
+                            const tieneAjuste = Boolean(cobro.motivo_ajuste || cobro.monto_original);
+                            const fechaLimiteReal = getFechaVencimientoRealISO(cobro, contratoActivo?.contratoOriginal?.fecha_inicio);
+
+                            return (
+                              <tr key={id} className="hover:bg-slate-50/50 transition-colors">
+                                <td className="py-3 px-4">
+                                  <span className="font-bold text-slate-800 text-xs flex items-center gap-1.5">
+                                    {conceptoNombre}
+                                    {tieneAjuste && (
+                                      <span className="px-1.5 py-0.5 rounded text-[10px] font-extrabold bg-blue-100 text-blue-800 border border-blue-200">
+                                        Ajustado
+                                      </span>
+                                    )}
+                                  </span>
+                                  {cobro.motivo_ajuste ? (
+                                    <span className="text-[11px] font-medium text-blue-600 block italic">
+                                      Nota: {cobro.motivo_ajuste}
+                                    </span>
+                                  ) : cobro.descripcion && cobro.descripcion !== conceptoNombre ? (
+                                    <span className="text-[11px] text-slate-400 block">{cobro.descripcion}</span>
+                                  ) : null}
+                                </td>
+
+                                <td className="py-3 px-4">
+                                  {estaEditandoEsteMes && !esPagado ? (
+                                    <div className="flex items-center gap-1.5">
+                                      <input
+                                        type="number"
+                                        step="0.01"
+                                        min="0"
+                                        value={montosEditadosMap[id] ?? ''}
+                                        onChange={(e) =>
+                                          setMontosEditadosMap((prev) => ({
+                                            ...prev,
+                                            [id]: e.target.value,
+                                          }))
+                                        }
+                                        className="w-24 py-1 px-2 border-2 border-amber-400 rounded-lg text-xs font-black text-slate-900 bg-amber-50/40 outline-none focus:border-blue-600"
+                                      />
+                                      <span className="text-xs font-bold text-slate-500">{cobro.moneda || 'BOB'}</span>
+                                    </div>
+                                  ) : (
+                                    <>
+                                      <span className="font-extrabold text-slate-900 text-xs">
+                                        {monto.toFixed(2)} {cobro.moneda || 'BOB'}
+                                      </span>
+                                      {cobro.monto_original && Number(cobro.monto_original) !== monto && (
+                                        <span className="text-[10px] text-slate-400 line-through block">
+                                          Orig: {Number(cobro.monto_original).toFixed(2)}
+                                        </span>
+                                      )}
+                                      {!esPagado && saldo < monto && saldo > 0 && (
+                                        <span className="text-[11px] font-bold text-amber-600 block">Saldo: {saldo.toFixed(2)}</span>
+                                      )}
+                                    </>
+                                  )}
+                                </td>
+
+                                <td className="py-3 px-4 text-xs font-medium text-slate-600">
+                                  {formatFechaDMY(fechaLimiteReal)}
+                                </td>
+
+                                <td className="py-3 px-4">
+                                  <span className={`px-2 py-0.5 text-[11px] font-extrabold border rounded-md ${
+                                    esPagado 
+                                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
+                                      : 'bg-amber-50 text-amber-700 border-amber-200'
+                                  }`}>
+                                    {esPagado ? 'PAGADO' : 'PENDIENTE'}
+                                  </span>
+                                </td>
+
+                                <td className="py-3 px-4 text-right">
+                                  {!esPagado ? (
+                                    <button
+                                      type="button"
+                                      disabled={estaEditandoEsteMes}
+                                      onClick={() => abrirFormPago(cobro)}
+                                      className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-40 text-white font-bold text-xs rounded-lg shadow-sm transition-all active:scale-95 inline-flex items-center gap-1 cursor-pointer"
+                                    >
+                                      <CheckCircle2 size={13} /> Cobrar
+                                    </button>
+                                  ) : (
+                                    <span className="text-xs font-bold text-emerald-600 inline-flex items-center gap-1">
+                                      <CheckCircle2 size={14} /> Pagado
                                     </span>
                                   )}
-                                </span>
-                                {cobro.motivo_ajuste ? (
-                                  <span className="text-[11px] font-medium text-blue-600 block italic">
-                                    Nota: {cobro.motivo_ajuste}
-                                  </span>
-                                ) : cobro.descripcion && cobro.descripcion !== conceptoNombre ? (
-                                  <span className="text-[11px] text-slate-400 block">{cobro.descripcion}</span>
-                                ) : null}
-                              </td>
-
-                              <td className="py-3 px-4">
-                                <span className="font-extrabold text-slate-900 text-xs">
-                                  {monto.toFixed(2)} {cobro.moneda || 'BOB'}
-                                </span>
-                                {cobro.monto_original && Number(cobro.monto_original) !== monto && (
-                                  <span className="text-[10px] text-slate-400 line-through block">
-                                    Orig: {Number(cobro.monto_original).toFixed(2)}
-                                  </span>
-                                )}
-                                {!esPagado && saldo < monto && saldo > 0 && (
-                                  <span className="text-[11px] font-bold text-amber-600 block">Saldo: {saldo.toFixed(2)}</span>
-                                )}
-                              </td>
-
-                              <td className="py-3 px-4 text-xs font-medium text-slate-600">
-                                {formatFechaDMY(cobro.fecha_vencimiento)}
-                              </td>
-
-                              <td className="py-3 px-4">
-                                <span className={`px-2 py-0.5 text-[11px] font-extrabold border rounded-md ${
-                                  esPagado 
-                                    ? 'bg-emerald-50 text-emerald-700 border-emerald-200' 
-                                    : 'bg-amber-50 text-amber-700 border-amber-200'
-                                }`}>
-                                  {esPagado ? 'PAGADO' : 'PENDIENTE'}
-                                </span>
-                              </td>
-
-                              <td className="py-3 px-4 text-right">
-                                {!esPagado ? (
-                                  <button
-                                    type="button"
-                                    onClick={() => abrirFormPago(cobro)}
-                                    className="px-3 py-1 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-lg shadow-sm transition-all active:scale-95 inline-flex items-center gap-1 cursor-pointer"
-                                  >
-                                    <CheckCircle2 size={13} /> Cobrar
-                                  </button>
-                                ) : (
-                                  <span className="text-xs font-bold text-emerald-600 inline-flex items-center gap-1">
-                                    <CheckCircle2 size={14} /> Pagado
-                                  </span>
-                                )}
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                ))
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })
               ) : (
                 <div className="text-center py-10 text-slate-400 text-sm">
                   Este contrato no registra cuotas emitidas.
@@ -932,13 +1258,112 @@ export function ListadoCobros() {
             <div className="px-6 py-3.5 bg-slate-50 border-t border-slate-200 flex justify-end">
               <button
                 type="button"
-                onClick={() => setContratoActivoId(null)}
+                onClick={() => {
+                  setContratoActivoId(null);
+                  cancelarEdicionMes();
+                }}
                 className="px-5 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
               >
                 Cerrar
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ================= SUBMODAL ENVIAR RECIBO POR WHATSAPP ================= */}
+      {modalWhatsappData && contratoActivo && (
+        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[60] flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-white rounded-3xl w-full max-w-md overflow-hidden shadow-2xl border border-slate-100 animate-scale-up">
+            <div className="bg-[#128C7E] px-6 py-4 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <MessageCircle size={20} />
+                <div>
+                  <h3 className="font-extrabold text-base">Enviar por WhatsApp</h3>
+                  <p className="text-xs text-emerald-100">{modalWhatsappData.grupo.nombrePeriodo}</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalWhatsappData(null)}
+                className="text-emerald-100 hover:text-white p-1 rounded-lg cursor-pointer"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleEnviarWhatsapp} className="p-6 space-y-4">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
+                  Numero de WhatsApp del Cliente *
+                </label>
+                <div className="relative flex items-center">
+                  <Phone size={16} className="absolute left-3.5 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ej. 70012345 o 59170012345"
+                    value={modalWhatsappData.telefono}
+                    onChange={(e) =>
+                      setModalWhatsappData((prev) => ({ ...prev, telefono: e.target.value }))
+                    }
+                    className="w-full py-2.5 pl-10 pr-3.5 border-2 border-slate-200 rounded-xl text-sm font-extrabold text-slate-900 outline-none focus:border-[#25D366]"
+                  />
+                </div>
+                <span className="text-[11px] text-slate-400 mt-1 block">
+                  Puedes modificar el numero aqui si el cliente cambio de linea.
+                </span>
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 uppercase mb-1.5">
+                  Vista previa del mensaje
+                </label>
+                <textarea
+                  rows={7}
+                  value={modalWhatsappData.mensaje}
+                  onChange={(e) =>
+                    setModalWhatsappData((prev) => ({ ...prev, mensaje: e.target.value }))
+                  }
+                  className="w-full p-3 border border-slate-200 rounded-xl text-xs font-medium text-slate-700 bg-slate-50 outline-none focus:border-[#25D366] resize-none"
+                />
+              </div>
+
+              <div className="flex flex-wrap justify-end gap-2 pt-3 border-t border-slate-100">
+                <button
+                  type="button"
+                  disabled={subiendoPdfWhatsapp}
+                  onClick={() => setModalWhatsappData(null)}
+                  className="px-3.5 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-100 text-xs cursor-pointer disabled:opacity-50"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={subiendoPdfWhatsapp}
+                  className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  <MessageCircle size={14} /> Solo Texto
+                </button>
+                <button
+                  type="button"
+                  disabled={subiendoPdfWhatsapp}
+                  onClick={handleEnviarPdfCloudinaryWhatsapp}
+                  className="px-4 py-2.5 bg-[#25D366] hover:bg-[#1ebe5d] text-white font-bold rounded-xl shadow-lg shadow-emerald-600/20 text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+                >
+                  {subiendoPdfWhatsapp ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin" /> Subiendo PDF...
+                    </>
+                  ) : (
+                    <>
+                      <Printer size={14} /> Enviar Enlace PDF
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}
