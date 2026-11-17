@@ -595,6 +595,7 @@ export function NuevoContrato({ onClose, onSave }) {
         moneda: formData.moneda,
         garantia: parseFloat(formData.garantia) || 0,
         numero_llaves: Number(formData.numero_llaves) || 1,
+        dia_limite_fin: Number(formData.dia_limite_fin) || 5,
         estado: formData.tipo_contrato,
         conceptosIds: conceptosIds,
         conceptosDetalle: conceptosDetalle,
