@@ -35,6 +35,7 @@ import {
 import { listarUsuarios, crearUsuario } from '../../services/usuarioService';
 import { listarDepartamentos } from '../../services/departamentoService';
 import { listarEdificios } from '../../services/edificioService';
+import { generarCodigoDepartamento } from '../utils/codigoDepartamento';
 
 // Ordenamiento de conceptos financieros por prioridad comercial
 const getPrioridadConcepto = (nombre = '') => {
@@ -191,9 +192,16 @@ export function NuevoContrato({ onClose, onSave }) {
           .map(d => {
             const edNombre = mapEdificios[d.id_edificio] || 'Edificio';
             const num = d.numero_departamento || d.numero || 'S/N';
+            const codigo = generarCodigoDepartamento({
+              nombreEdificio: edNombre,
+              piso: d.piso || 1,
+              numeroDepartamento: num,
+              bloque: d.bloque,
+            });
             return {
               id: d.id_departamento || d.id,
-              texto: `${edNombre} - Piso ${d.piso || 1} Depto ${num}`,
+              codigo,
+              texto: `[${codigo}] ${edNombre} - Piso ${d.piso || 1} Depto ${num}`,
               precio_alquiler: d.precio_alquiler || 1550,
               numero_llaves: d.numero_llaves !== null && d.numero_llaves !== undefined ? Number(d.numero_llaves) : 1
             };
@@ -689,7 +697,7 @@ export function NuevoContrato({ onClose, onSave }) {
         {/* 1. SELECCION DE UNIDAD, TIPO Y LLAVES ENTREGADAS */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Piso y Departamento</label>
+            <label className="block text-sm font-bold text-slate-700 mb-2">Unidad / Departamento</label>
             <div className="relative flex items-center">
               <Home size={18} className="absolute left-4 text-slate-400 pointer-events-none" />
               <select

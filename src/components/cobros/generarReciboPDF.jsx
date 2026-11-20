@@ -83,11 +83,30 @@ export function descargarReciboPDF({ contrato = {}, grupo = {}, fechaEmision, co
   const nroRecibo = String(idRaw).padStart(5, '0');
   const montoTotal = Number(grupo.totalMonto ?? 0);
 
+  // Extraer el dia de inicio real del contrato (ej. si inicio 01/11/2026 -> dia = 1)
+  let diaCorteContrato = 1;
+  const fechaInicioContrato = contrato?.contratoOriginal?.fecha_inicio || contrato?.fecha_inicio;
+  if (fechaInicioContrato) {
+    const soloFecha = String(fechaInicioContrato).split('T')[0];
+    const partes = soloFecha.split('-').map(Number);
+    if (partes.length === 3 && partes[2]) {
+      diaCorteContrato = partes[2];
+    }
+  }
+
   let fDesde = grupo.fechaInicio ? formatCorto(grupo.fechaInicio) : '';
   let fHasta = grupo.fechaFin ? formatCorto(grupo.fechaFin) : '';
+
   if (!fDesde || !fHasta) {
-    fDesde = formatCorto(new Date(anioPeriodo, mesNumero - 1, 11));
-    fHasta = formatCorto(new Date(anioPeriodo, mesNumero, 11));
+    // Ajustar el dia de corte al maximo de dias del mes (ej. febrero)
+    const maxDiasMesActual = new Date(anioPeriodo, mesNumero, 0).getDate();
+    const diaDesdeReal = Math.min(diaCorteContrato, maxDiasMesActual);
+
+    const maxDiasMesSiguiente = new Date(anioPeriodo, mesNumero + 1, 0).getDate();
+    const diaHastaReal = Math.min(diaCorteContrato, maxDiasMesSiguiente);
+
+    fDesde = formatCorto(new Date(anioPeriodo, mesNumero - 1, diaDesdeReal));
+    fHasta = formatCorto(new Date(anioPeriodo, mesNumero, diaHastaReal));
   }
 
   const inquilinoNombre = (contrato.inquilino || 'INQUILINO').toUpperCase();

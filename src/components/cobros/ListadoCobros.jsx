@@ -30,6 +30,7 @@ import { listarContratos, finalizarContrato } from '../../services/contratoServi
 import { listarUsuarios } from '../../services/usuarioService';
 import { Recibo } from './Recibo';
 import { descargarReciboPDF } from './generarReciboPDF';
+import { generarCodigoDepartamento } from '../utils/codigoDepartamento';
 
 const MESES = [
   '', 'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 
@@ -250,6 +251,16 @@ export function ListadoCobros() {
       const telefonoInquilino = con.telefono || usrInfo.telefono || '';
       const estadoContrato = (con.estado || 'ACTIVO').toUpperCase();
 
+      const deptoNumero = depto.numero || 'S/N';
+      const deptoPiso = depto.piso || 1;
+      const deptoBloque = depto.bloque || '';
+      const codigoUnidad = generarCodigoDepartamento({
+        nombreEdificio,
+        piso: deptoPiso,
+        numeroDepartamento: deptoNumero,
+        bloque: deptoBloque,
+      });
+
       const cobrosContrato = cobros.filter(c => Number(c.id_contrato) === Number(idContrato));
 
       let totalDeuda = 0;
@@ -294,9 +305,10 @@ export function ListadoCobros() {
         idEdificio,
         edificio: nombreEdificio,
         direccion_edificio: direccionEdificio,
-        deptoNumero: depto.numero || 'S/N',
-        deptoPiso: depto.piso || 1,
-        deptoBloque: depto.bloque || '',
+        codigoUnidad,
+        deptoNumero,
+        deptoPiso,
+        deptoBloque,
         personas: con.personas || con.cantidad_personas || con.cantidadPersonas || 1,
         montoAlquiler: Number(con.monto_renta || con.monto_alquiler || con.precio_alquiler || 0),
         moneda: con.moneda || 'BOB',
@@ -383,7 +395,7 @@ export function ListadoCobros() {
     const mensajeArmado = 
       `*${estadoTexto}*\n` +
       `Inquilino: ${contratoActivo.inquilino}\n` +
-      `Inmueble: ${contratoActivo.edificio} - Depto ${contratoActivo.deptoNumero}\n` +
+      `Inmueble: [${contratoActivo.codigoUnidad}] ${contratoActivo.edificio} - Depto ${contratoActivo.deptoNumero}\n` +
       `Periodo: *${grupo.nombrePeriodo}*\n` +
       `Fecha emision: ${formatFechaDMY(fechaReciboManual)}\n\n` +
       `*Detalle:*\n${lineasConceptos}\n\n` +
@@ -685,6 +697,7 @@ export function ListadoCobros() {
     return tarjetasContratos.filter(card => {
       const term = busqueda.toLowerCase().trim();
       const coincideTexto = !term || 
+        card.codigoUnidad.toLowerCase().includes(term) ||
         card.inquilino.toLowerCase().includes(term) ||
         card.edificio.toLowerCase().includes(term) ||
         card.deptoNumero.toLowerCase().includes(term);
@@ -751,7 +764,7 @@ export function ListadoCobros() {
             <Search size={18} className="text-slate-400 shrink-0" />
             <input 
               type="text" 
-              placeholder="Buscar por inquilino, edificio o numero de depto..." 
+              placeholder="Buscar por codigo (ej. L21SB), inquilino, edificio o depto..." 
               value={busqueda}
               onChange={(e) => setBusqueda(e.target.value)}
               className="bg-transparent border-none outline-none ml-2 text-sm text-slate-800 w-full placeholder:text-slate-400"
@@ -863,9 +876,14 @@ export function ListadoCobros() {
                       )}
                     </div>
 
-                    <span className="text-xs font-extrabold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100 flex items-center gap-1">
-                      <Home size={13} /> Depto {card.deptoNumero}
-                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="px-2 py-1 bg-slate-900 text-white font-mono text-[11px] font-extrabold rounded-lg tracking-wider">
+                        {card.codigoUnidad}
+                      </span>
+                      <span className="text-xs font-extrabold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-lg border border-blue-100 flex items-center gap-1">
+                        <Home size={13} /> Depto {card.deptoNumero}
+                      </span>
+                    </div>
                   </div>
 
                   <h3 className="font-black text-slate-900 text-base leading-snug flex items-center gap-1.5 truncate">
@@ -942,7 +960,10 @@ export function ListadoCobros() {
                   <Wallet size={20} />
                 </div>
                 <div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="px-2 py-0.5 bg-blue-600/30 text-blue-200 border border-blue-400/30 font-mono text-xs font-extrabold rounded-md tracking-wider">
+                      {contratoActivo.codigoUnidad}
+                    </span>
                     <h3 className="font-extrabold text-base">
                       Cobranzas - {contratoActivo.inquilino}
                     </h3>
@@ -952,7 +973,7 @@ export function ListadoCobros() {
                       </span>
                     )}
                   </div>
-                  <p className="text-xs text-slate-400">
+                  <p className="text-xs text-slate-400 mt-0.5">
                     {contratoActivo.edificio} • Piso {contratoActivo.deptoPiso} Depto {contratoActivo.deptoNumero} {contratoActivo.deptoBloque ? `(Bloque ${contratoActivo.deptoBloque})` : ''}
                   </p>
                 </div>
@@ -1101,7 +1122,7 @@ export function ListadoCobros() {
                               onClick={() => setReciboData({
                                 contrato: contratoActivo,
                                 grupo,
-                                fechaEmision: fechaReciboManual
+                                fechaEmision: fechaReciboManual,
                               })}
                               className="flex items-center gap-1.5 px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-md shadow-emerald-600/20 transition-all active:scale-95 cursor-pointer"
                             >
@@ -1388,7 +1409,7 @@ export function ListadoCobros() {
 
             <form onSubmit={handleConfirmarFinalizacion} className="p-6 space-y-4">
               <p className="text-xs text-slate-600 leading-relaxed">
-                Estas a punto de concluir el contrato de <strong className="text-slate-900">{contratoActivo.inquilino}</strong> (Depto {contratoActivo.deptoNumero}).
+                Estas a punto de concluir el contrato de <strong className="text-slate-900">{contratoActivo.inquilino}</strong> ({contratoActivo.codigoUnidad} - Depto {contratoActivo.deptoNumero}).
               </p>
 
               <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-900 space-y-1">
@@ -1453,7 +1474,7 @@ export function ListadoCobros() {
                     Cobrar Cuota: {conceptosMap[cobroAPagar.id_concepto] || cobroAPagar.descripcion || 'Servicio'}
                   </h3>
                   <p className="text-xs text-slate-400">
-                    Contrato: {contratoActivo?.inquilino} • Unidad {contratoActivo?.deptoNumero}
+                    Contrato: {contratoActivo?.inquilino} • {contratoActivo?.codigoUnidad} (Depto {contratoActivo?.deptoNumero})
                   </p>
                 </div>
               </div>

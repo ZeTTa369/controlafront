@@ -153,23 +153,39 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
   // 3. Monto total
   const montoTotal = Number(grupo.totalMonto ?? 0);
 
-  // 4. Fechas de inicio y fin del mes
+  // 4. Fechas de inicio y fin del periodo basadas en el dia real de inicio del contrato
+  let diaCorteContrato = 1;
+  const fechaInicioContrato =
+    contrato?.contratoOriginal?.fecha_inicio || contrato?.fecha_inicio;
+  if (fechaInicioContrato) {
+    const soloFecha = String(fechaInicioContrato).split("T")[0];
+    const partes = soloFecha.split("-").map(Number);
+    if (partes.length === 3 && partes[2]) {
+      diaCorteContrato = partes[2];
+    }
+  }
+
   let fDesde = grupo.fechaInicio ? formatCorto(grupo.fechaInicio) : "";
   let fHasta = grupo.fechaFin ? formatCorto(grupo.fechaFin) : "";
 
   if (!fDesde || !fHasta) {
-    const primerDia = new Date(anioPeriodo, mesNumero - 1, 11);
-    const siguienteMes = new Date(anioPeriodo, mesNumero, 11);
-    fDesde = formatCorto(primerDia);
-    fHasta = formatCorto(siguienteMes);
+    const maxDiasMesActual = new Date(anioPeriodo, mesNumero, 0).getDate();
+    const diaDesdeReal = Math.min(diaCorteContrato, maxDiasMesActual);
+
+    const maxDiasMesSiguiente = new Date(anioPeriodo, mesNumero + 1, 0).getDate();
+    const diaHastaReal = Math.min(diaCorteContrato, maxDiasMesSiguiente);
+
+    fDesde = formatCorto(new Date(anioPeriodo, mesNumero - 1, diaDesdeReal));
+    fHasta = formatCorto(new Date(anioPeriodo, mesNumero, diaHastaReal));
   }
 
-  // 5. Inquilino y unidad
+  // 5. Inquilino, piso y unidad
   const inquilinoNombre = (contrato.inquilino || "INQUILINO").toUpperCase();
+  const numPiso = contrato.deptoPiso ?? contrato.piso ?? "1";
   const numDepto = contrato.deptoNumero || "1";
-  const cantPersonas = contrato.personas || 2;
+  const cantPersonas = contrato.personas || 1;
   const nombrePeriodo = (
-    grupo.nombrePeriodo || `JULIO ${anioPeriodo}`
+    grupo.nombrePeriodo || `PERIODO ${anioPeriodo}`
   ).toUpperCase();
 
   // 6. Construccion dinamica del concepto con soporte para ajustes / excepciones
@@ -222,7 +238,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
     textoServicios = ` (${motivoGeneral.toUpperCase()})`;
   }
 
-  const textoConcepto = `PAGO DEP ${numDepto} DEL ${fDesde} AL ${fHasta}${textoServicios} (${nombrePeriodo})`;
+  const textoConcepto = `PAGO PISO ${numPiso} DEP ${numDepto} DEL ${fDesde} AL ${fHasta}${textoServicios} (${nombrePeriodo})`;
 
   // 7. Direccion completa del edificio
   const direccionEdificio =
