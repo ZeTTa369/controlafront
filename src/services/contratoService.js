@@ -32,8 +32,8 @@ export async function crearContrato(data) {
 
 // Actualizar datos de un contrato existente (fechas, montos, estado)
 export async function actualizarContrato(id, data) {
-  const res = await fetch(`${API_URL}/${id}`, {
-    method: "PATCH",
+  const res = await fetch(`${BASE_URL}/contratos/${id}`, {
+    method: 'PATCH',
     headers: getAuthHeaders(),
     body: JSON.stringify(data),
   });
@@ -112,8 +112,8 @@ export async function subirDocumentosContrato(idContrato, itemsDocumentos) {
 
 // Obtener documentos activos vinculados a un contrato
 export async function obtenerDocumentosContrato(idContrato) {
-  const res = await fetch(`${API_URL}/${idContrato}/documentos`, {
-    method: "GET",
+  const res = await fetch(`${BASE_URL}/contratos/${idContrato}/documentos`, {
+    method: 'GET',
     headers: getAuthHeaders(),
   });
   return handleResponse(res);

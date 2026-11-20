@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import {
   Home,
   Hash,
@@ -16,6 +16,7 @@ import {
   Trash2,
   Loader2,
   Key,
+  QrCode,
 } from "lucide-react";
 import toast from "react-hot-toast";
 import {
@@ -27,6 +28,7 @@ import {
 } from "../../services/departamentoService";
 import { listarEdificios } from "../../services/edificioService";
 import { ModalConfirmarEliminar } from "../modals/ModalConfirmarEliminar";
+import { generarCodigoDepartamento } from "../utils/codigoDepartamento";
 
 export function NuevoDepartamento({
   onClose,
@@ -63,6 +65,19 @@ export function NuevoDepartamento({
   const [eliminandoFoto, setEliminandoFoto] = useState(false);
 
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Calculo en tiempo real del codigo de la unidad (Ej. L21SB)
+  const codigoGenerado = useMemo(() => {
+    const edificioObj = edificios.find(
+      (e) => String(e.id_edificio || e.id) === String(formData.edificioId),
+    );
+    return generarCodigoDepartamento({
+      nombreEdificio: edificioObj?.nombre || "",
+      piso: formData.piso,
+      numeroDepartamento: formData.numero,
+      bloque: formData.bloque,
+    });
+  }, [edificios, formData.edificioId, formData.piso, formData.numero, formData.bloque]);
 
   // Carga inicial de edificios
   useEffect(() => {
@@ -206,9 +221,10 @@ export function NuevoDepartamento({
       isEdit ? "Actualizando unidad..." : "Guardando unidad...",
     );
 
-    // Mapeo del payload incluyendo el numero de llaves
+    // Mapeo del payload incluyendo el codigo generado y el numero de llaves
     const payload = {
       id_edificio: Number(formData.edificioId),
+      codigo: codigoGenerado,
       piso: Number(formData.piso) || 1,
       numero_departamento: String(formData.numero).trim(),
       bloque: formData.bloque ? formData.bloque : null,
@@ -247,7 +263,9 @@ export function NuevoDepartamento({
       }
 
       toast.success(
-        isEdit ? "Departamento actualizado correctamente" : "Departamento registrado exitosamente",
+        isEdit
+          ? `Departamento (${codigoGenerado}) actualizado correctamente`
+          : `Departamento (${codigoGenerado}) registrado exitosamente`,
         { id: toastId },
       );
 
@@ -367,7 +385,7 @@ export function NuevoDepartamento({
                 type="text"
                 name="numero"
                 required
-                placeholder="Ej. 101, Depto A"
+                placeholder="Ej. 1, 101..."
                 value={formData.numero}
                 onChange={handleChange}
                 className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-bold"
@@ -393,12 +411,23 @@ export function NuevoDepartamento({
                 onChange={handleChange}
                 className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-bold appearance-none cursor-pointer text-sm"
               >
-                <option value="">Sin bloque / No especificado</option>
+                <option value="">Sin bloque (SB)</option>
                 <option value="Exterior">Exterior</option>
                 <option value="Interior">Interior</option>
               </select>
             </div>
           </div>
+        </div>
+
+        {/* Vista previa en tiempo real del Codigo de la Unidad */}
+        <div className="flex items-center justify-between px-4 py-3 bg-blue-50/70 border border-blue-200 rounded-xl">
+          <div className="flex items-center gap-2 text-xs font-bold text-blue-900">
+            <QrCode size={16} className="text-blue-600 shrink-0" />
+            <span>Código Identificador de Unidad:</span>
+          </div>
+          <span className="px-3 py-1 bg-blue-600 text-white font-mono font-extrabold text-sm tracking-wider rounded-lg shadow-sm">
+            {codigoGenerado}
+          </span>
         </div>
 
         {/* Configuracion de Medidores */}

@@ -28,6 +28,7 @@ import {
 import { listarEdificios } from '../../services/edificioService';
 import { NuevoDepartamento } from './NuevoDepartamento';
 import { ModalConfirmarEliminar } from '../modals/ModalConfirmarEliminar';
+import { generarCodigoDepartamento } from '../utils/codigoDepartamento';
 
 export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
   const [departamentos, setDepartamentos] = useState([]);
@@ -82,6 +83,17 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Helper para obtener el codigo de unidad consistente
+  const obtenerCodigoUnidad = (depto) => {
+    const nombreEdificio = edificiosMap[depto.id_edificio] || '';
+    return generarCodigoDepartamento({
+      nombreEdificio,
+      piso: depto.piso,
+      numeroDepartamento: depto.numero_departamento || depto.numero,
+      bloque: depto.bloque,
+    });
   };
 
   // Actualizacion optimista del estado local tras edicion exitosa
@@ -140,13 +152,14 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
 
     const id = deptoAEliminar.id_departamento || deptoAEliminar.id;
     const numero = deptoAEliminar.numero_departamento || deptoAEliminar.numero || 'N/A';
+    const codigo = obtenerCodigoUnidad(deptoAEliminar);
 
     setEliminando(true);
-    const toastId = toast.loading(`Eliminando departamento ${numero}...`);
+    const toastId = toast.loading(`Eliminando unidad ${codigo} (${numero})...`);
 
     try {
       await eliminarDepartamento(id);
-      toast.success(`Departamento ${numero} eliminado correctamente`, { id: toastId });
+      toast.success(`Unidad ${codigo} eliminada correctamente`, { id: toastId });
       setDepartamentos(prev => prev.filter(d => (d.id_departamento || d.id) !== id));
       setDeptoAEliminar(null);
     } catch (error) {
@@ -160,11 +173,12 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
     }
   };
 
-  // Filtrado reactivo en memoria
+  // Filtrado reactivo en memoria (incluye busqueda por codigo de unidad ej. L21SB)
   const departamentosFiltrados = useMemo(() => {
     return departamentos.filter((depto) => {
       const term = busqueda.toLowerCase().trim();
       const numero = String(depto.numero_departamento || depto.numero || '').toLowerCase();
+      const codigo = obtenerCodigoUnidad(depto).toLowerCase();
       const tipo = (depto.tipo_inmueble || '').toLowerCase();
       const bloque = (depto.bloque || '').toLowerCase();
       const edId = depto.id_edificio;
@@ -182,6 +196,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
       if (!term) return true;
 
       return (
+        codigo.includes(term) ||
         numero.includes(term) ||
         tipo.includes(term) ||
         bloque.includes(term) ||
@@ -226,7 +241,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 mb-8">
         <div>
           <h2 className="text-xl font-extrabold text-slate-800">Listado de Unidades / Departamentos</h2>
-          <p className="text-sm text-slate-500">Supervisa la disponibilidad, llaves, medidores, galeria y caracteristicas de cada inmueble.</p>
+          <p className="text-sm text-slate-500">Supervisa la disponibilidad, codigo identificador, llaves, medidores y galeria de cada inmueble.</p>
         </div>
 
         <button 
@@ -243,7 +258,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
           <Search size={18} className="text-slate-400 shrink-0" />
           <input 
             type="text" 
-            placeholder="Buscar por numero, bloque, tipo u observaciones..." 
+            placeholder="Buscar por codigo (ej. L21SB), numero, bloque o tipo..." 
             value={busqueda}
             onChange={(e) => setBusqueda(e.target.value)}
             className="bg-transparent border-none outline-none ml-2 text-sm text-slate-800 w-full"
@@ -295,7 +310,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
           <table className="w-full text-left border-collapse min-w-[950px]">
             <thead>
               <tr className="border-b border-slate-100 text-xs font-bold text-slate-400 uppercase tracking-wider">
-                <th className="py-4 px-4">Unidad / Bloque</th>
+                <th className="py-4 px-4">Codigo / Unidad</th>
                 <th className="py-4 px-4">Edificio</th>
                 <th className="py-4 px-4">Tipo / Ambiente</th>
                 <th className="py-4 px-4 text-center">Llaves</th>
@@ -310,15 +325,16 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                 departamentosFiltrados.map((depto) => {
                   const id = depto.id_departamento || depto.id;
                   const numero = depto.numero_departamento || depto.numero || 'N/A';
+                  const codigoUnidad = obtenerCodigoUnidad(depto);
                   const nombreEdificio = edificiosMap[depto.id_edificio] || `Edificio #${depto.id_edificio || 1}`;
                   const precio = Number(depto.precio_alquiler || 0);
                   const estadoActual = (depto.estado || 'DISPONIBLE').toUpperCase();
-                  const bloque = depto.bloque || 'No Definido';
+                  const bloque = depto.bloque || '';
                   const llavesCount = Number(depto.numero_llaves !== null && depto.numero_llaves !== undefined ? depto.numero_llaves : 1);
 
                   return (
                     <tr key={id} className="hover:bg-slate-50/80 transition-colors">
-                      {/* Unidad, Piso, Bloque y Boton de Galeria */}
+                      {/* Codigo, Unidad, Piso, Bloque y Boton de Galeria */}
                       <td className="py-4 px-4">
                         <div className="flex items-center gap-3">
                           <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl shrink-0">
@@ -326,7 +342,10 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                           </div>
                           <div>
                             <div className="flex items-center gap-2">
-                              <p className="font-extrabold text-slate-800 text-base">{numero}</p>
+                              <span className="px-2 py-0.5 bg-slate-900 text-white font-mono text-xs font-extrabold rounded-md tracking-wider">
+                                {codigoUnidad}
+                              </span>
+                              <p className="font-extrabold text-slate-800 text-sm">Depto {numero}</p>
                               <button
                                 type="button"
                                 onClick={() => handleVerGaleria(depto)}
@@ -336,18 +355,14 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
                                 <Camera size={14} />
                               </button>
                             </div>
-                            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium mt-0.5">
+                            <div className="flex items-center gap-1.5 text-xs text-slate-500 font-medium mt-1">
                               <span className="flex items-center gap-0.5">
                                 <Layers size={12} className="text-slate-400" /> Piso {depto.piso || 1}
                               </span>
-                              {bloque && (
-                                <>
-                                  <span>•</span>
-                                  <span className="flex items-center gap-0.5 text-blue-600 font-semibold">
-                                    <Compass size={12} /> Bloque {bloque}
-                                  </span>
-                                </>
-                              )}
+                              <span>•</span>
+                              <span className="flex items-center gap-0.5 text-blue-600 font-semibold">
+                                <Compass size={12} /> {bloque ? `Bloque ${bloque}` : 'Sin Bloque'}
+                              </span>
                             </div>
                           </div>
                         </div>
@@ -465,8 +480,8 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
           onClose={() => setDeptoAEliminar(null)}
           onConfirm={confirmarEliminacion}
           loading={eliminando}
-          titulo={`Eliminar departamento ${deptoAEliminar.numero_departamento || deptoAEliminar.numero}?`}
-          mensaje={`Estas a punto de eliminar el departamento ${deptoAEliminar.numero_departamento || deptoAEliminar.numero} del edificio "${edificiosMap[deptoAEliminar.id_edificio] || 'Edificio'}". Esta accion borrara el registro de la base de datos.`}
+          titulo={`Eliminar unidad ${obtenerCodigoUnidad(deptoAEliminar)} (Depto ${deptoAEliminar.numero_departamento || deptoAEliminar.numero})?`}
+          mensaje={`Estas a punto de eliminar la unidad ${obtenerCodigoUnidad(deptoAEliminar)} del edificio "${edificiosMap[deptoAEliminar.id_edificio] || 'Edificio'}". Esta accion borrara el registro de la base de datos.`}
         />
       )}
 
@@ -490,7 +505,7 @@ export function ListadoDepartamentos({ onNuevoDepartamentoClick }) {
             <div className="bg-slate-900 px-6 py-4 text-white flex items-center justify-between">
               <div>
                 <h3 className="font-bold text-base">
-                  Fotografias: Unidad {galeriaActiva.depto.numero_departamento || galeriaActiva.depto.numero}
+                  Fotografias: {obtenerCodigoUnidad(galeriaActiva.depto)} — Unidad {galeriaActiva.depto.numero_departamento || galeriaActiva.depto.numero}
                 </h3>
                 <p className="text-xs text-slate-400">
                   {edificiosMap[galeriaActiva.depto.id_edificio] || 'Edificio'}
