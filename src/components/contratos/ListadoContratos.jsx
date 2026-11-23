@@ -282,12 +282,15 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
     if (!contratoSeleccionado) return false;
     const idContrato = contratoSeleccionado.id_contrato || contratoSeleccionado.id;
 
+    // Eliminar propiedades de control local antes de enviar al DTO del backend
+    const { id_temp, id_habitante, ...datosLimpiados } = payloadHabitante;
+
     setGuardandoHabitante(true);
     try {
       if (habitanteEditando && habitanteEditando.id_habitante) {
         const actualizado = await actualizarHabitanteContrato(
           habitanteEditando.id_habitante,
-          payloadHabitante
+          datosLimpiados
         );
 
         setHabitantesAll((prev) =>
@@ -313,7 +316,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
         );
         toast.success('Datos del habitante actualizados');
       } else {
-        const creado = await agregarHabitanteContrato(idContrato, payloadHabitante);
+        const creado = await agregarHabitanteContrato(idContrato, datosLimpiados);
 
         setHabitantesAll((prev) => [...prev, creado]);
         setContratos((prev) =>
