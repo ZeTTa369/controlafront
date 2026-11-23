@@ -6,10 +6,7 @@ import {
   Home, 
   Settings, 
   LogOut, 
-  Bell, 
-  Search,
   Menu,
-  TrendingUp,
   AlertCircle,
   Plus,
   ChevronDown,
@@ -19,7 +16,6 @@ import {
   UserPlus,
   Receipt,
   FileText,
-  CreditCard,
   Wrench
 } from 'lucide-react';
 
@@ -34,10 +30,7 @@ import { NuevoConcepto } from './components/conceptos/NuevoConcepto';
 import { ListadoConceptos } from './components/conceptos/ListadoConceptos';
 import { NuevoContrato } from './components/contratos/NuevoContrato';
 import { ListadoContratos } from './components/contratos/ListadoContratos';
-import { NuevoCobro } from './components/cobros/NuevoCobro';
 import { ListadoCobros } from './components/cobros/ListadoCobros';
-import { NuevoPago } from './components/pagos/NuevoPago';
-import { ListadoPagos } from './components/pagos/ListadoPagos';
 import { NuevaRefaccion } from './components/refacciones/NuevaRefaccion';
 import { ListadoRefacciones } from './components/refacciones/ListadoRefacciones';
 
@@ -293,36 +286,12 @@ export function Dashboard({ setIsAuthenticated }) {
                   )}
 
                   <button
-                    onClick={() => setActiveMenu('Registrar Cobro')}
-                    className={`w-full flex items-center px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                      activeMenu === 'Registrar Cobro' ? 'text-blue-400 font-bold bg-slate-800/50' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <Plus size={16} className="mr-2" /> Generar Cobro
-                  </button>
-                  <button
                     onClick={() => setActiveMenu('Lista de Cobros')}
                     className={`w-full flex items-center px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
                       activeMenu === 'Lista de Cobros' ? 'text-blue-400 font-bold bg-slate-800/50' : 'text-slate-400 hover:text-white'
                     }`}
                   >
                     <List size={16} className="mr-2" /> Listar Cobros
-                  </button>
-                  <button
-                    onClick={() => setActiveMenu('Registrar Pago')}
-                    className={`w-full flex items-center px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                      activeMenu === 'Registrar Pago' ? 'text-blue-400 font-bold bg-slate-800/50' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <CreditCard size={16} className="mr-2" /> Registrar Pago
-                  </button>
-                  <button
-                    onClick={() => setActiveMenu('Lista de Pagos')}
-                    className={`w-full flex items-center px-3 py-2.5 rounded-lg text-xs font-medium transition-all ${
-                      activeMenu === 'Lista de Pagos' ? 'text-blue-400 font-bold bg-slate-800/50' : 'text-slate-400 hover:text-white'
-                    }`}
-                  >
-                    <List size={16} className="mr-2" /> Listar Pagos
                   </button>
                 </div>
               )}
@@ -533,22 +502,9 @@ export function Dashboard({ setIsAuthenticated }) {
             <ListadoConceptos onNuevoConceptoClick={() => { setIsCobrosOpen(true); setActiveMenu('Registrar Concepto'); }} />
           )}
 
-          {/* VISTAS DE COBROS Y PAGOS */}
-          {activeMenu === 'Registrar Cobro' && !esConserje && (
-            <div className="max-w-3xl mx-auto">
-              <NuevoCobro onClose={() => setActiveMenu('Lista de Cobros')} onSave={() => setActiveMenu('Lista de Cobros')} />
-            </div>
-          )}
+          {/* VISTAS DE COBROS */}
           {activeMenu === 'Lista de Cobros' && !esConserje && (
-            <ListadoCobros onNuevoCobroClick={() => { setIsCobrosOpen(true); setActiveMenu('Registrar Cobro'); }} />
-          )}
-          {activeMenu === 'Registrar Pago' && !esConserje && (
-            <div className="max-w-3xl mx-auto">
-              <NuevoPago onClose={() => setActiveMenu('Lista de Pagos')} onSave={() => setActiveMenu('Lista de Pagos')} />
-            </div>
-          )}
-          {activeMenu === 'Lista de Pagos' && !esConserje && (
-            <ListadoPagos onNuevoPagoClick={() => { setIsCobrosOpen(true); setActiveMenu('Registrar Pago'); }} />
+            <ListadoCobros />
           )}
 
           {/* VISTAS DE REFACCIONES */}

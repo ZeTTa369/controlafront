@@ -1,10 +1,33 @@
 /**
+ * Extrae el prefijo del edificio:
+ * - "Condominio Claris" => "CC"
+ * - "Sueño Real" / "Sueñor Real" => "SR"
+ * - "Edificio Lorena" => "L"
+ */
+function obtenerPrefijoEdificio(nombreEdificio = '') {
+  const limpio = String(nombreEdificio)
+    .trim()
+    .replace(/^(EDIFICIO|TORRE)\s+/i, '');
+
+  if (!limpio) return 'X';
+
+  const conectores = new Set(['DE', 'DEL', 'LA', 'LAS', 'LOS', 'EL', 'Y']);
+  const palabras = limpio
+    .split(/\s+/)
+    .filter((p) => p && !conectores.has(p.toUpperCase()));
+
+  if (palabras.length === 0) return 'X';
+
+  if (palabras.length === 1) {
+    return palabras[0].charAt(0).toUpperCase();
+  }
+
+  return palabras.map((p) => p.charAt(0).toUpperCase()).join('');
+}
+
+/**
  * Genera el codigo identificador unico de un departamento/unidad.
- * Formato: [Inicial Edificio][Piso][Departamento][Bloque]
- * Ejemplos:
- * - Edificio Lorena, Piso 2, Depto 1, Sin Bloque => "L21SB"
- * - Edificio Lorena, Piso 2, Depto 1, Exterior   => "L21E"
- * - Edificio Lorena, Piso 2, Depto 1, Interior   => "L21I"
+ * Formato: [Prefijo Edificio][Piso][Departamento][Bloque]
  */
 export function generarCodigoDepartamento({
   nombreEdificio = '',
@@ -12,25 +35,18 @@ export function generarCodigoDepartamento({
   numeroDepartamento = '',
   bloque = '',
 }) {
-  // 1. Inicial del edificio (ignora prefijos comunes como "Edificio", "Condominio" o "Torre")
-  const nombreLimpio = String(nombreEdificio)
-    .trim()
-    .replace(/^(EDIFICIO|CONDOMINIO|TORRE)\s+/i, '');
-  const inicialEdificio = nombreLimpio.charAt(0).toUpperCase() || 'X';
+  const prefijoEdificio = obtenerPrefijoEdificio(nombreEdificio);
 
-  // 2. Piso
   const pisoStr =
     piso !== null && piso !== undefined && String(piso).trim() !== ''
       ? String(piso).trim()
       : '1';
 
-  // 3. Numero de departamento
   const deptoStr = String(numeroDepartamento || '0')
     .trim()
     .toUpperCase()
     .replace(/\s+/g, '');
 
-  // 4. Bloque: Exterior => 'E', Interior => 'I', Sin bloque => 'SB'
   const bloqueLimpio = String(bloque || '')
     .trim()
     .toUpperCase()
@@ -50,5 +66,5 @@ export function generarCodigoDepartamento({
     bloqueStr = bloqueLimpio.charAt(0);
   }
 
-  return `${inicialEdificio}${pisoStr}${deptoStr}${bloqueStr}`;
+  return `${prefijoEdificio}${pisoStr}${deptoStr}${bloqueStr}`;
 }

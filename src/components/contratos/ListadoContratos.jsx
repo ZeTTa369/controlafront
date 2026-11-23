@@ -19,7 +19,8 @@ import {
   Key,
   Paperclip,
   ExternalLink,
-  Clock
+  Clock,
+  UserPlus
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import jsPDF from 'jspdf';
@@ -27,12 +28,17 @@ import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
 import { 
   listarContratos, 
   eliminarContrato, 
-  obtenerDocumentosContrato 
+  obtenerDocumentosContrato,
+  listarHabitantesContratos,
+  agregarHabitanteContrato,
+  actualizarHabitanteContrato,
+  eliminarHabitanteContrato
 } from '../../services/contratoService';
 import { listarUsuarios } from '../../services/usuarioService';
 import { listarCobros } from '../../services/cobroPagoService';
 import { ModalConfirmarEliminar } from '../modals/ModalConfirmarEliminar';
 import { ModalEditarContrato } from '../modals/ModalEditarContrato';
+import { ModalNuevoHabitante } from '../modals/ModalNuevoHabitante';
 import { generarCodigoDepartamento } from '../utils/codigoDepartamento';
 
 // Helper para convertir cualquier fecha a formato DD/MM/YYYY
@@ -87,7 +93,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
   // Filtros
   const [busqueda, setBusqueda] = useState('');
   const [filtroEdificio, setFiltroEdificio] = useState('');
-  const [tabEstado, setTabEstado] = useState('TODOS'); // 'TODOS' | 'VIGENTES' | 'TERCEROS' | 'FINALIZADO'
+  const [tabEstado, setTabEstado] = useState('TODOS');
   const [loading, setLoading] = useState(true);
 
   // Mapeos relacionales
@@ -102,6 +108,11 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
   const [contratoSeleccionado, setContratoSeleccionado] = useState(null);
   const [documentosDetalle, setDocumentosDetalle] = useState([]);
   const [loadingDetalle, setLoadingDetalle] = useState(false);
+
+  // Gestion de Habitantes desde el Detalle del Contrato
+  const [modalHabitanteAbierto, setModalHabitanteAbierto] = useState(false);
+  const [habitanteEditando, setHabitanteEditando] = useState(null);
+  const [guardandoHabitante, setGuardandoHabitante] = useState(false);
 
   // Modal de Edición
   const [contratoAEditar, setContratoAEditar] = useState(null);
@@ -132,7 +143,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
         listarUsuarios().catch(() => []),
         listarCobros().catch(() => []),
         fetch(`${BASE_URL}/conceptos`, { headers: getAuthHeaders() }).then(handleResponse).catch(() => []),
-        fetch(`${BASE_URL}/habitantes`, { headers: getAuthHeaders() }).then(handleResponse).catch(() => []),
+        listarHabitantesContratos().catch(() => []),
       ]);
 
       // 1. Mapa de Edificios
@@ -248,10 +259,117 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
 
   // Obtener habitantes censados de un contrato
   const obtenerHabitantesContrato = (contrato) => {
+    if (!contrato) return [];
     const idContrato = contrato.id_contrato || contrato.id;
-    return habitantesAll.filter(
+
+    // Priorizar el estado sincronizado en habitantesAll si tiene registros para este contrato
+    const delEstadoGlobal = habitantesAll.filter(
       h => Number(h.id_contrato) === Number(idContrato) && (h.estado || 'ACTIVO').toUpperCase() === 'ACTIVO'
     );
+    if (delEstadoGlobal.length > 0) return delEstadoGlobal;
+
+    if (Array.isArray(contrato.habitantes)) {
+      return contrato.habitantes.filter(
+        h => (h.estado || 'ACTIVO').toUpperCase() === 'ACTIVO'
+      );
+    }
+
+    return [];
+  };
+
+  // Guardar nuevo habitante o editar uno existente dentro del contrato seleccionado
+  const handleGuardarHabitanteContrato = async (payloadHabitante) => {
+    if (!contratoSeleccionado) return false;
+    const idContrato = contratoSeleccionado.id_contrato || contratoSeleccionado.id;
+
+    setGuardandoHabitante(true);
+    try {
+      if (habitanteEditando && habitanteEditando.id_habitante) {
+        const actualizado = await actualizarHabitanteContrato(
+          habitanteEditando.id_habitante,
+          payloadHabitante
+        );
+
+        setHabitantesAll((prev) =>
+          prev.map((h) =>
+            Number(h.id_habitante) === Number(habitanteEditando.id_habitante)
+              ? { ...h, ...actualizado }
+              : h
+          )
+        );
+        setContratos((prev) =>
+          prev.map((c) => {
+            if (Number(c.id_contrato || c.id) !== Number(idContrato)) return c;
+            const listaActual = Array.isArray(c.habitantes) ? c.habitantes : [];
+            return {
+              ...c,
+              habitantes: listaActual.map((h) =>
+                Number(h.id_habitante) === Number(habitanteEditando.id_habitante)
+                  ? { ...h, ...actualizado }
+                  : h
+              ),
+            };
+          })
+        );
+        toast.success('Datos del habitante actualizados');
+      } else {
+        const creado = await agregarHabitanteContrato(idContrato, payloadHabitante);
+
+        setHabitantesAll((prev) => [...prev, creado]);
+        setContratos((prev) =>
+          prev.map((c) => {
+            if (Number(c.id_contrato || c.id) !== Number(idContrato)) return c;
+            const listaActual = Array.isArray(c.habitantes) ? c.habitantes : [];
+            return {
+              ...c,
+              habitantes: [...listaActual, creado],
+            };
+          })
+        );
+        toast.success('Habitante agregado al contrato');
+      }
+
+      setHabitanteEditando(null);
+      return true;
+    } catch (error) {
+      console.error('Error guardando habitante:', error);
+      toast.error(error.message || 'No se pudo guardar el habitante');
+      return false;
+    } finally {
+      setGuardandoHabitante(false);
+    }
+  };
+
+  // Dar de baja un habitante del contrato
+  const handleEliminarHabitanteContrato = async (habitante) => {
+    if (!contratoSeleccionado || !habitante?.id_habitante) return;
+    const idContrato = contratoSeleccionado.id_contrato || contratoSeleccionado.id;
+
+    const toastId = toast.loading('Quitando habitante del contrato...');
+    try {
+      await eliminarHabitanteContrato(habitante.id_habitante);
+
+      setHabitantesAll((prev) =>
+        prev.filter((h) => Number(h.id_habitante) !== Number(habitante.id_habitante))
+      );
+      setContratos((prev) =>
+        prev.map((c) => {
+          if (Number(c.id_contrato || c.id) !== Number(idContrato)) return c;
+          const listaActual = Array.isArray(c.habitantes) ? c.habitantes : [];
+          return {
+            ...c,
+            habitantes: listaActual.filter(
+              (h) => Number(h.id_habitante) !== Number(habitante.id_habitante)
+            ),
+          };
+        })
+      );
+
+      toast.success('Habitante retirado del censo', { id: toastId });
+    } catch (error) {
+      console.error('Error eliminando habitante:', error);
+      toast.error(error.message || 'No se pudo quitar el habitante', { id: toastId });
+    }
   };
 
   // Abrir modal de detalle y consultar documentos digitales adjuntos
@@ -441,7 +559,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
     return { total, vigentes, terceros, finalizados };
   }, [contratos]);
 
-  // Filtrado compuesto por Edificio, Estado y Buscador general (incluye codigo de unidad)
+  // Filtrado compuesto por Edificio, Estado y Buscador general
   const contratosFiltrados = useMemo(() => {
     return contratos.filter((c) => {
       const term = busqueda.toLowerCase().trim();
@@ -531,7 +649,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
         </div>
       </div>
 
-      {/* Barra de Filtros (Buscador + Filtro Edificio + Tabs de Estado) */}
+      {/* Barra de Filtros */}
       <div className="flex flex-col lg:flex-row gap-4 justify-between items-stretch lg:items-center mb-6">
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 flex-1 max-w-2xl">
           <div className="sm:col-span-2 flex items-center bg-slate-50 border border-slate-200 rounded-xl px-4 py-2.5 focus-within:border-blue-600 focus-within:bg-white transition-all">
@@ -680,7 +798,7 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                         </div>
                       </td>
 
-                      {/* Fechas de Vigencia Formato DD/MM/YYYY */}
+                      {/* Fechas de Vigencia */}
                       <td className="py-4 px-4 text-slate-600">
                         <div className="flex items-center gap-1 text-xs font-semibold bg-slate-100 w-fit px-2.5 py-1 rounded-md">
                           <Calendar size={13} className="text-slate-400 shrink-0" />
@@ -709,7 +827,6 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                       {/* Acciones */}
                       <td className="py-4 px-4 text-right">
                         <div className="flex items-center justify-end gap-1">
-                          {/* BOTÓN 1: VER DETALLE COMPLETO */}
                           <button 
                             type="button"
                             onClick={() => handleAbrirDetalle(contrato)}
@@ -719,7 +836,6 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                             <Eye size={17} />
                           </button>
 
-                          {/* BOTÓN 2: EDITAR CONTRATO */}
                           <button 
                             type="button"
                             onClick={() => setContratoAEditar(contrato)}
@@ -729,7 +845,6 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                             <Edit2 size={17} />
                           </button>
 
-                          {/* BOTÓN 3: DESCARGAR PDF PROTOCOLIZADO */}
                           <button 
                             type="button"
                             onClick={() => handleDescargarPDFContrato(contrato)}
@@ -739,7 +854,6 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                             <Printer size={17} />
                           </button>
 
-                          {/* BOTÓN 4: ELIMINAR */}
                           <button 
                             type="button"
                             onClick={() => setContratoAEliminar(contrato)}
@@ -867,26 +981,76 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
                 </div>
               </div>
 
-              {/* 3. Censo de Habitantes / Ocupantes */}
+              {/* 3. Censo de Habitantes / Ocupantes (Agregar / Editar / Quitar) */}
               <div className="bg-blue-50/40 p-4 rounded-xl border border-blue-200">
-                <h4 className="text-xs font-bold text-blue-900 uppercase tracking-wider mb-2.5 flex items-center gap-1.5">
-                  <Users size={15} className="text-blue-600" /> Censo de Habitantes / Ocupantes
-                </h4>
+                <div className="flex items-center justify-between gap-2 mb-3">
+                  <h4 className="text-xs font-bold text-blue-900 uppercase tracking-wider flex items-center gap-1.5">
+                    <Users size={15} className="text-blue-600" /> Censo de Habitantes / Ocupantes ({obtenerHabitantesContrato(contratoSeleccionado).length})
+                  </h4>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHabitanteEditando(null);
+                      setModalHabitanteAbierto(true);
+                    }}
+                    className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white rounded-lg text-[11px] font-bold flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                  >
+                    <UserPlus size={13} /> Agregar Habitante
+                  </button>
+                </div>
+
                 {(() => {
                   const habs = obtenerHabitantesContrato(contratoSeleccionado);
                   if (habs.length === 0) {
-                    return <p className="text-xs text-slate-500">No hay registros adicionales en el censo de ocupantes.</p>;
+                    return (
+                      <p className="text-xs text-slate-500 bg-white/80 p-3 rounded-lg border border-dashed border-blue-200 text-center">
+                        No hay registros en el censo de ocupantes. Usa <strong>"Agregar Habitante"</strong> para registrar al titular o dependientes.
+                      </p>
+                    );
                   }
                   return (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                       {habs.map((h, idx) => (
-                        <div key={h.id_habitante || idx} className="bg-white p-2.5 rounded-lg border border-blue-100 text-xs">
-                          <p className="font-extrabold text-slate-800">
-                            {h.nombres} {h.primer_apellido} {h.segundo_apellido || ''}
-                          </p>
-                          <p className="text-[11px] text-slate-500">
-                            {h.parentesco || 'Ocupante'} • CI: <strong>{h.ci_nit || 'S/C'}</strong> • {h.nacionalidad || 'Boliviana'}
-                          </p>
+                        <div
+                          key={h.id_habitante || idx}
+                          className="bg-white p-3 rounded-xl border border-blue-100 shadow-sm text-xs flex items-start justify-between gap-2"
+                        >
+                          <div className="min-w-0">
+                            <p className="font-extrabold text-slate-800 truncate">
+                              {h.nombres} {h.primer_apellido} {h.segundo_apellido || ''}
+                            </p>
+                            <p className="text-[11px] text-slate-500 mt-0.5">
+                              <span className="text-blue-600 font-bold">{h.parentesco || 'Ocupante'}</span> • CI: <strong>{h.ci_nit || 'S/C'}</strong>
+                            </p>
+                            <p className="text-[11px] text-slate-400">
+                              Nac: {h.nacionalidad || 'Boliviana'}{h.telefono ? ` • Tel: ${h.telefono}` : ''}
+                            </p>
+                          </div>
+
+                          {h.id_habitante && (
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setHabitanteEditando(h);
+                                  setModalHabitanteAbierto(true);
+                                }}
+                                title="Editar datos del habitante"
+                                className="p-1.5 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Edit2 size={14} />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleEliminarHabitanteContrato(h)}
+                                title="Quitar habitante del censo"
+                                className="p-1.5 text-slate-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -1003,6 +1167,18 @@ export function ListadoContratos({ onNuevoContratoClick, onVerDocumentoClick }) 
           </div>
         </div>
       )}
+
+      {/* ================= MODAL AGREGAR / EDITAR HABITANTE DEL CONTRATO ================= */}
+      <ModalNuevoHabitante
+        isOpen={modalHabitanteAbierto}
+        habitanteInicial={habitanteEditando}
+        loading={guardandoHabitante}
+        onClose={() => {
+          setModalHabitanteAbierto(false);
+          setHabitanteEditando(null);
+        }}
+        onAgregar={handleGuardarHabitanteContrato}
+      />
 
       {/* ================= MODAL EDITAR CONTRATO ================= */}
       <ModalEditarContrato
