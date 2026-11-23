@@ -29,7 +29,6 @@ import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
 import { ModalNuevoHabitante } from '../modals/ModalNuevoHabitante';
 import { 
   crearContrato, 
-  registrarHabitantesBatch, 
   subirDocumentosContrato 
 } from '../../services/contratoService';
 import { listarUsuarios, crearUsuario } from '../../services/usuarioService';
@@ -580,7 +579,36 @@ export function NuevoContrato({ onClose, onSave }) {
         idUsuarioFinal = nuevoUser.id_usuario || nuevoUser.id;
       }
 
-      // 2. Registrar el contrato principal
+      // 2. Armar censo completo de habitantes (Titular + Dependientes) para enviarlo junto con el contrato
+      const listaCenso = [];
+
+      if (formData.tipo_contrato !== 'TERCEROS') {
+        listaCenso.push({
+          nombres: inquilinoData.nombre.trim(),
+          primer_apellido: inquilinoData.primer_apellido.trim(),
+          segundo_apellido: inquilinoData.segundo_apellido?.trim() || null,
+          ci_nit: inquilinoData.ci_nit.trim(),
+          nacionalidad: inquilinoData.nacionalidad?.trim() || 'Boliviana',
+          parentesco: 'Titular',
+          telefono: inquilinoData.telefono?.trim() || null,
+          es_titular: 'SI',
+        });
+      }
+
+      habitantes.forEach(h => {
+        listaCenso.push({
+          nombres: h.nombres,
+          primer_apellido: h.primer_apellido,
+          segundo_apellido: h.segundo_apellido || null,
+          ci_nit: h.ci_nit || null,
+          nacionalidad: h.nacionalidad || 'Boliviana',
+          parentesco: h.parentesco || 'Familiar',
+          telefono: h.telefono || null,
+          es_titular: 'NO',
+        });
+      });
+
+      // 3. Registrar el contrato principal + censo de habitantes en una sola operacion
       const conceptosIds = listaConceptosActivosOrdenados.map(c => c.id_concepto);
       const conceptosDetalle = listaConceptosActivosOrdenados.map(c => ({
         id_concepto: Number(c.id_concepto),
@@ -607,55 +635,15 @@ export function NuevoContrato({ onClose, onSave }) {
         estado: formData.tipo_contrato,
         conceptosIds: conceptosIds,
         conceptosDetalle: conceptosDetalle,
+        habitantes: listaCenso,
       };
 
       const dataContrato = await crearContrato(payloadContrato);
       const nuevoIdContrato = dataContrato.id_contrato || dataContrato.id;
 
-      // 3. Registrar censo completo en la tabla habitantes (Titular + Dependientes)
-      if (nuevoIdContrato) {
-        const listaCenso = [];
-
-        if (formData.tipo_contrato !== 'TERCEROS') {
-          listaCenso.push({
-            id_contrato: Number(nuevoIdContrato),
-            id_departamento: Number(formData.id_departamento),
-            nombres: inquilinoData.nombre.trim(),
-            primer_apellido: inquilinoData.primer_apellido.trim(),
-            segundo_apellido: inquilinoData.segundo_apellido?.trim() || null,
-            ci_nit: inquilinoData.ci_nit.trim(),
-            nacionalidad: inquilinoData.nacionalidad?.trim() || 'Boliviana',
-            parentesco: 'Titular',
-            telefono: inquilinoData.telefono?.trim() || null,
-            es_titular: 'SI',
-            estado: 'ACTIVO',
-          });
-        }
-
-        habitantes.forEach(h => {
-          listaCenso.push({
-            id_contrato: Number(nuevoIdContrato),
-            id_departamento: Number(formData.id_departamento),
-            nombres: h.nombres,
-            primer_apellido: h.primer_apellido,
-            segundo_apellido: h.segundo_apellido || null,
-            ci_nit: h.ci_nit || null,
-            nacionalidad: h.nacionalidad || 'Boliviana',
-            parentesco: h.parentesco || 'Familiar',
-            telefono: h.telefono || null,
-            es_titular: 'NO',
-            estado: 'ACTIVO',
-          });
-        });
-
-        if (listaCenso.length > 0) {
-          await registrarHabitantesBatch(listaCenso);
-        }
-
-        // 4. Subir documentos digitales de respaldo (PDF e imagenes) si se adjuntaron
-        if (documentosAdjuntos.length > 0) {
-          await subirDocumentosContrato(nuevoIdContrato, documentosAdjuntos);
-        }
+      // 4. Subir documentos digitales de respaldo (PDF e imagenes) si se adjuntaron
+      if (nuevoIdContrato && documentosAdjuntos.length > 0) {
+        await subirDocumentosContrato(nuevoIdContrato, documentosAdjuntos);
       }
 
       generarPDFContrato();

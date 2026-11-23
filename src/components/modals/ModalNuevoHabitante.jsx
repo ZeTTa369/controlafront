@@ -1,8 +1,28 @@
-import { useState } from 'react';
-import { UserPlus, X, CheckCircle2, Globe } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { UserPlus, Edit2, X, CheckCircle2, Globe, Loader2 } from 'lucide-react';
 import toast from 'react-hot-toast';
 
-export function ModalNuevoHabitante({ isOpen, onClose, onAgregar }) {
+const PARENTESCOS_ESTANDAR = [
+  'Titular',
+  'Hijo(a)',
+  'Conyuge / Pareja',
+  'Padre / Madre',
+  'Hermano(a)',
+  'Sobrino(a)',
+  'Tio(a)',
+  'Beneficiario / Ocupante Real',
+  'Companero(a) de Cuarto',
+];
+
+export function ModalNuevoHabitante({
+  isOpen,
+  onClose,
+  onAgregar,
+  habitanteInicial = null,
+  loading = false,
+}) {
+  const esEdicion = Boolean(habitanteInicial);
+
   const [nombres, setNombres] = useState('');
   const [primerApellido, setPrimerApellido] = useState('');
   const [segundoApellido, setSegundoApellido] = useState('');
@@ -11,10 +31,44 @@ export function ModalNuevoHabitante({ isOpen, onClose, onAgregar }) {
   const [parentescoSeleccion, setParentescoSeleccion] = useState('Hijo(a)');
   const [parentescoOtro, setParentescoOtro] = useState('');
   const [telefono, setTelefono] = useState('');
+  const [esTitular, setEsTitular] = useState('NO');
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    if (habitanteInicial) {
+      setNombres(habitanteInicial.nombres || '');
+      setPrimerApellido(habitanteInicial.primer_apellido || '');
+      setSegundoApellido(habitanteInicial.segundo_apellido || '');
+      setCiNit(habitanteInicial.ci_nit || '');
+      setNacionalidad(habitanteInicial.nacionalidad || 'Boliviana');
+      setTelefono(habitanteInicial.telefono || '');
+      setEsTitular(habitanteInicial.es_titular || 'NO');
+
+      const par = habitanteInicial.parentesco || 'Hijo(a)';
+      if (PARENTESCOS_ESTANDAR.includes(par)) {
+        setParentescoSeleccion(par);
+        setParentescoOtro('');
+      } else {
+        setParentescoSeleccion('OTRO');
+        setParentescoOtro(par);
+      }
+    } else {
+      setNombres('');
+      setPrimerApellido('');
+      setSegundoApellido('');
+      setCiNit('');
+      setNacionalidad('Boliviana');
+      setTelefono('');
+      setParentescoSeleccion('Hijo(a)');
+      setParentescoOtro('');
+      setEsTitular('NO');
+    }
+  }, [isOpen, habitanteInicial]);
 
   if (!isOpen) return null;
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
 
     if (!nombres.trim() || !primerApellido.trim()) {
@@ -27,12 +81,16 @@ export function ModalNuevoHabitante({ isOpen, onClose, onAgregar }) {
       return;
     }
 
-    const parentescoFinal = parentescoSeleccion === 'OTRO' 
-      ? parentescoOtro.trim() 
-      : parentescoSeleccion;
+    const parentescoFinal =
+      parentescoSeleccion === 'OTRO'
+        ? parentescoOtro.trim()
+        : parentescoSeleccion;
 
-    onAgregar({
-      id_temp: Date.now(),
+    const payload = {
+      id_temp: habitanteInicial?.id_temp || Date.now(),
+      ...(habitanteInicial?.id_habitante
+        ? { id_habitante: habitanteInicial.id_habitante }
+        : {}),
       nombres: nombres.trim(),
       primer_apellido: primerApellido.trim(),
       segundo_apellido: segundoApellido.trim(),
@@ -40,39 +98,50 @@ export function ModalNuevoHabitante({ isOpen, onClose, onAgregar }) {
       nacionalidad: nacionalidad.trim() || 'Boliviana',
       parentesco: parentescoFinal,
       telefono: telefono.trim(),
-    });
+      es_titular: parentescoFinal === 'Titular' ? 'SI' : esTitular,
+    };
 
-    toast.success('Habitante agregado al censo del contrato');
+    const resultado = await onAgregar(payload);
+    if (resultado === false) return;
 
-    // Reinicio del formulario
-    setNombres('');
-    setPrimerApellido('');
-    setSegundoApellido('');
-    setCiNit('');
-    setNacionalidad('Boliviana');
-    setTelefono('');
-    setParentescoSeleccion('Hijo(a)');
-    setParentescoOtro('');
+    if (!esEdicion) {
+      toast.success('Habitante agregado al censo del contrato');
+      setNombres('');
+      setPrimerApellido('');
+      setSegundoApellido('');
+      setCiNit('');
+      setNacionalidad('Boliviana');
+      setTelefono('');
+      setParentescoSeleccion('Hijo(a)');
+      setParentescoOtro('');
+      setEsTitular('NO');
+    }
+
     onClose();
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
       <div className="bg-white rounded-2xl shadow-2xl border border-slate-100 w-full max-w-lg overflow-hidden relative animate-scale-up">
         
         {/* Cabecera del modal */}
         <div className="flex items-center justify-between p-6 border-b border-slate-100 bg-slate-50/50">
           <div className="flex items-center gap-3">
-            <div className="p-2.5 bg-blue-50 text-blue-600 rounded-xl">
-              <UserPlus size={20} />
+            <div className={`p-2.5 rounded-xl ${esEdicion ? 'bg-amber-50 text-amber-600' : 'bg-blue-50 text-blue-600'}`}>
+              {esEdicion ? <Edit2 size={20} /> : <UserPlus size={20} />}
             </div>
             <div>
-              <h3 className="font-extrabold text-slate-900 text-lg">Registrar Habitante / Ocupante</h3>
-              <p className="text-xs text-slate-500">Censo de personas autorizadas a residir en la unidad</p>
+              <h3 className="font-extrabold text-slate-900 text-lg">
+                {esEdicion ? 'Editar Datos del Habitante' : 'Registrar Habitante / Ocupante'}
+              </h3>
+              <p className="text-xs text-slate-500">
+                Censo de personas autorizadas a residir en la unidad
+              </p>
             </div>
           </div>
           <button
             type="button"
+            disabled={loading}
             onClick={onClose}
             className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
           >
@@ -80,7 +149,7 @@ export function ModalNuevoHabitante({ isOpen, onClose, onAgregar }) {
           </button>
         </div>
 
-        {/* Formulario de registro */}
+        {/* Formulario de registro / edicion */}
         <form onSubmit={handleSubmit} className="p-6 space-y-4">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
@@ -184,6 +253,7 @@ export function ModalNuevoHabitante({ isOpen, onClose, onAgregar }) {
                 onChange={(e) => setParentescoSeleccion(e.target.value)}
                 className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-sm font-bold text-slate-800 outline-none focus:border-blue-600 focus:bg-white transition-all appearance-none cursor-pointer"
               >
+                <option value="Titular">Titular</option>
                 <option value="Hijo(a)">Hijo(a)</option>
                 <option value="Conyuge / Pareja">Conyuge / Pareja</option>
                 <option value="Padre / Madre">Padre / Madre</option>
@@ -196,7 +266,6 @@ export function ModalNuevoHabitante({ isOpen, onClose, onAgregar }) {
               </select>
             </div>
 
-            {/* Campo condicional si se selecciona OTRO */}
             {parentescoSeleccion === 'OTRO' && (
               <div className="p-3 bg-blue-50/70 border border-blue-200 rounded-xl animate-fade-in">
                 <label className="block text-xs font-extrabold text-blue-900 mb-1">
@@ -217,17 +286,27 @@ export function ModalNuevoHabitante({ isOpen, onClose, onAgregar }) {
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
             <button
               type="button"
+              disabled={loading}
               onClick={onClose}
-              className="px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer"
+              className="px-4 py-2.5 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-all cursor-pointer disabled:opacity-50"
             >
               Cancelar
             </button>
             <button
               type="submit"
-              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/20 active:scale-95 cursor-pointer"
+              disabled={loading}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white font-bold px-5 py-2.5 rounded-xl text-sm transition-all shadow-lg shadow-blue-600/20 active:scale-95 cursor-pointer disabled:opacity-50"
             >
-              <CheckCircle2 size={16} />
-              Agregar Habitante
+              {loading ? (
+                <>
+                  <Loader2 size={16} className="animate-spin" /> Guardando...
+                </>
+              ) : (
+                <>
+                  <CheckCircle2 size={16} />
+                  {esEdicion ? 'Guardar Cambios' : 'Agregar Habitante'}
+                </>
+              )}
             </button>
           </div>
         </form>

@@ -20,7 +20,7 @@ export async function obtenerContrato(id) {
   return handleResponse(res);
 }
 
-// Crear un nuevo contrato con inquilino, montos y conceptos asociados
+// Crear un nuevo contrato con inquilino, montos, habitantes y conceptos asociados
 export async function crearContrato(data) {
   const res = await fetch(API_URL, {
     method: "POST",
@@ -77,12 +77,20 @@ export async function obtenerContratosPorUsuario(idUsuario) {
   return handleResponse(res);
 }
 
-// Registrar lote de habitantes para un contrato
-export async function registrarHabitantesBatch(habitantesPayload) {
-  const res = await fetch(`${BASE_URL}/habitantes/batch`, {
-    method: "POST",
+// Listar todos los habitantes activos vinculados a contratos
+export async function listarHabitantesContratos() {
+  const res = await fetch(`${API_URL}/habitantes/todos`, {
+    method: "GET",
     headers: getAuthHeaders(),
-    body: JSON.stringify(habitantesPayload),
+  });
+  return handleResponse(res);
+}
+
+// Obtener habitantes activos de un contrato especifico
+export async function obtenerHabitantesPorContrato(idContrato) {
+  const res = await fetch(`${API_URL}/${idContrato}/habitantes`, {
+    method: "GET",
+    headers: getAuthHeaders(),
   });
   return handleResponse(res);
 }
@@ -142,6 +150,35 @@ export async function finalizarContrato(idContrato, fechaFin) {
     method: "PATCH",
     headers: getAuthHeaders(),
     body: JSON.stringify({ fecha_fin: fechaFin }),
+  });
+  return handleResponse(res);
+}
+
+// Agregar un habitante a un contrato existente
+export async function agregarHabitanteContrato(idContrato, habitanteData) {
+  const res = await fetch(`${API_URL}/${idContrato}/habitantes`, {
+    method: "POST",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(habitanteData),
+  });
+  return handleResponse(res);
+}
+
+// Editar datos de un habitante existente
+export async function actualizarHabitanteContrato(idHabitante, habitanteData) {
+  const res = await fetch(`${API_URL}/habitantes/${idHabitante}`, {
+    method: "PATCH",
+    headers: getAuthHeaders(),
+    body: JSON.stringify(habitanteData),
+  });
+  return handleResponse(res);
+}
+
+// Eliminar (dar de baja) un habitante de un contrato
+export async function eliminarHabitanteContrato(idHabitante) {
+  const res = await fetch(`${API_URL}/habitantes/${idHabitante}`, {
+    method: "DELETE",
+    headers: getAuthHeaders(),
   });
   return handleResponse(res);
 }

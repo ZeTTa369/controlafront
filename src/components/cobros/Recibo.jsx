@@ -1,4 +1,5 @@
 import { X, Printer } from "lucide-react";
+import { generarCodigoDepartamento } from "../utils/codigoDepartamento";
 
 // Helper para convertir numeros a palabras en espanol (Bolivianos)
 function numeroALetras(monto) {
@@ -145,10 +146,25 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
   const anioPeriodo = anioFechaManual || grupo.anio || grupo.items?.[0]?.periodo_anio || 2026;
   const mesNumero = grupo.mes || grupo.items?.[0]?.periodo_mes || 7;
 
-  // 2. Numero correlativo formateado a 5 digitos
+  // 2. Codigo de unidad + correlativo por edificio y anio (Ej. L11SB0001 / CC25I0001)
+  const codigoUnidad =
+    contrato.codigoUnidad ||
+    generarCodigoDepartamento({
+      nombreEdificio: contrato.edificio || "",
+      piso: contrato.deptoPiso ?? contrato.piso ?? 1,
+      numeroDepartamento: contrato.deptoNumero || "1",
+      bloque: contrato.deptoBloque || "",
+    });
+
+  const reciboGuardado =
+    grupo.numeroRecibo ||
+    grupo.items?.find((it) => it.numero_recibo)?.numero_recibo;
+
   const idRaw =
-    grupo.idRecibo || grupo.items?.[0]?.id_cobro || contrato.idContrato || 130;
-  const nroRecibo = String(idRaw).padStart(5, "0");
+    grupo.idRecibo || grupo.items?.[0]?.id_cobro || contrato.idContrato || 1;
+
+  const nroRecibo =
+    reciboGuardado || `${codigoUnidad}${String(idRaw).padStart(4, "0")}`;
 
   // 3. Monto total
   const montoTotal = Number(grupo.totalMonto ?? 0);
@@ -272,7 +288,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
             {/* Cabecera: Direccion vs Nro y Monto */}
             <div className="grid grid-cols-12 gap-3 items-start pb-5">
               {/* Direccion */}
-              <div className="col-span-7 text-[11px] leading-tight text-slate-800 font-bold space-y-0.5">
+              <div className="col-span-6 sm:col-span-7 text-[11px] leading-tight text-slate-800 font-bold space-y-0.5">
                 <p>
                   <span className="font-black text-[#102a45]">Direccion: </span>
                   {direccionEdificio}
@@ -283,24 +299,24 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
               </div>
 
               {/* Recuadro de Recibo Nro y Monto */}
-              <div className="col-span-5 flex flex-col items-end">
+              <div className="col-span-6 sm:col-span-5 flex flex-col items-end">
                 <div className="w-full border-2 border-slate-900 rounded-sm divide-y-2 divide-slate-900 overflow-hidden text-center bg-white">
                   {/* Fila Nro Recibo */}
                   <div className="flex items-center text-xs">
-                    <span className="w-24 py-1.5 px-2 font-black text-[#102a45] border-r-2 border-slate-900 text-left">
+                    <span className="w-20 py-1.5 px-2 font-black text-[#102a45] border-r-2 border-slate-900 text-left shrink-0">
                       RECIBO Nº
                     </span>
-                    <span className="flex-1 py-1.5 px-2 font-black text-red-600 text-base tracking-widest text-center">
+                    <span className="flex-1 py-1.5 px-1.5 font-mono font-black text-red-600 text-[11px] sm:text-xs tracking-wider text-center whitespace-nowrap">
                       {nroRecibo}
                     </span>
                   </div>
 
                   {/* Fila Monto */}
                   <div className="flex items-center text-xs">
-                    <span className="w-24 py-1.5 px-2 font-black text-[#102a45] border-r-2 border-slate-900 text-left">
+                    <span className="w-20 py-1.5 px-2 font-black text-[#102a45] border-r-2 border-slate-900 text-left shrink-0">
                       POR:
                     </span>
-                    <span className="flex-1 py-1.5 px-2 font-black text-slate-950 text-sm tracking-wide text-center">
+                    <span className="flex-1 py-1.5 px-1.5 font-black text-slate-950 text-xs sm:text-sm tracking-wide text-center whitespace-nowrap">
                       Bs.{" "}
                       {montoTotal.toLocaleString("es-BO", {
                         minimumFractionDigits: 2,
@@ -366,7 +382,7 @@ export function Recibo({ reciboData, conceptosMap = {}, onClose }) {
                 <div className="font-mono text-[9px] text-slate-400 tracking-widest select-none opacity-70">
                   |||||| |||| ||| |||||||
                   <p className="text-[8px] font-bold tracking-wider text-slate-500">
-                    *ODSC{parseInt(nroRecibo, 10)}*
+                    *{nroRecibo}*
                   </p>
                 </div>
               </div>

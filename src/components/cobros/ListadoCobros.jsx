@@ -25,11 +25,11 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
-import { listarCobros, pagarCobro, actualizarCobrosLote, subirReciboPdfCloudinary } from '../../services/cobroPagoService';
+import { listarCobros, pagarCobro, actualizarCobrosLote, subirReciboImagenCloudinary } from '../../services/cobroPagoService';
 import { listarContratos, finalizarContrato } from '../../services/contratoService';
 import { listarUsuarios } from '../../services/usuarioService';
 import { Recibo } from './Recibo';
-import { descargarReciboPDF } from './generarReciboPDF';
+import { generarReciboImagen } from './generarReciboImagen';
 import { generarCodigoDepartamento } from '../utils/codigoDepartamento';
 
 const MESES = [
@@ -141,7 +141,7 @@ export function ListadoCobros() {
 
   // Estados para envio por WhatsApp
   const [modalWhatsappData, setModalWhatsappData] = useState(null);
-  const [subiendoPdfWhatsapp, setSubiendoPdfWhatsapp] = useState(false);
+  const [subiendoImagenWhatsapp, setSubiendoImagenWhatsapp] = useState(false);
 
   // Estados para desbloquear y editar precios de un mes
   const [mesEditandoClave, setMesEditandoClave] = useState(null);
@@ -347,10 +347,15 @@ export function ListadoCobros() {
           fechaInicio: cobro.fecha_inicio,
           fechaFin: cobro.fecha_fin,
           idRecibo: cobro.id_cobro || cobro.id,
+          numeroRecibo: cobro.numero_recibo || null,
           items: [],
           totalMonto: 0,
           totalSaldo: 0,
         };
+      }
+
+      if (!grupos[clave].numeroRecibo && cobro.numero_recibo) {
+        grupos[clave].numeroRecibo = cobro.numero_recibo;
       }
 
       const monto = Number(cobro.monto || 0);
@@ -395,7 +400,7 @@ export function ListadoCobros() {
     const mensajeArmado = 
       `*${estadoTexto}*\n` +
       `Inquilino: ${contratoActivo.inquilino}\n` +
-      `Inmueble: [${contratoActivo.codigoUnidad}] ${contratoActivo.edificio} - Depto ${contratoActivo.deptoNumero}\n` +
+      `Inmueble: [${contratoActivo.codigoUnidad}] ${contratoActivo.edificio} - Piso ${contratoActivo.deptoPiso} Depto ${contratoActivo.deptoNumero}\n` +
       `Periodo: *${grupo.nombrePeriodo}*\n` +
       `Fecha emision: ${formatFechaDMY(fechaReciboManual)}\n\n` +
       `*Detalle:*\n${lineasConceptos}\n\n` +
@@ -427,8 +432,8 @@ export function ListadoCobros() {
     setModalWhatsappData(null);
   };
 
-  // Subir recibo PDF a Cloudinary y abrir WhatsApp con el enlace directo
-  const handleEnviarPdfCloudinaryWhatsapp = async () => {
+  // Subir captura PNG del recibo a Cloudinary y abrir WhatsApp con el enlace directo
+  const handleEnviarImagenCloudinaryWhatsapp = async () => {
     if (!modalWhatsappData || !contratoActivo) return;
 
     const soloDigitos = String(modalWhatsappData.telefono || '').replace(/\D/g, '');
@@ -437,26 +442,25 @@ export function ListadoCobros() {
       return;
     }
 
-    setSubiendoPdfWhatsapp(true);
-    const toastId = toast.loading('Generando recibo PDF y subiendo a la nube...');
+    setSubiendoImagenWhatsapp(true);
+    const toastId = toast.loading('Generando captura del recibo y subiendo a la nube...');
 
     try {
-      const { blob, nombreArchivo } = descargarReciboPDF({
+      const { blob, nombreArchivo } = await generarReciboImagen({
         contrato: contratoActivo,
         grupo: modalWhatsappData.grupo,
         fechaEmision: fechaReciboManual,
         conceptosMap,
-        soloBlob: true,
       });
 
-      const respuesta = await subirReciboPdfCloudinary(blob, nombreArchivo);
-      const urlPdf = respuesta?.url;
+      const respuesta = await subirReciboImagenCloudinary(blob, nombreArchivo);
+      const urlImagen = respuesta?.url;
 
-      if (!urlPdf) {
-        throw new Error('El servidor no devolvio el enlace del PDF');
+      if (!urlImagen) {
+        throw new Error('El servidor no devolvio el enlace de la imagen');
       }
 
-      const mensajeConEnlace = `${modalWhatsappData.mensaje}\n\n*Descargar Recibo Oficial (PDF):*\n${urlPdf}`;
+      const mensajeConEnlace = `${modalWhatsappData.mensaje}\n\n*Ver Recibo Oficial (Imagen):*\n${urlImagen}`;
       const numeroConCodigo = soloDigitos.length === 8 ? `591${soloDigitos}` : soloDigitos;
       const urlWhatsapp = `https://wa.me/${numeroConCodigo}?text=${encodeURIComponent(mensajeConEnlace)}`;
 
@@ -464,10 +468,10 @@ export function ListadoCobros() {
       window.open(urlWhatsapp, '_blank', 'noopener,noreferrer');
       setModalWhatsappData(null);
     } catch (error) {
-      console.error('Error al generar y subir recibo PDF:', error);
-      toast.error(error.message || 'No se pudo subir el recibo PDF', { id: toastId });
+      console.error('Error al generar y subir imagen del recibo:', error);
+      toast.error(error.message || 'No se pudo subir la imagen del recibo', { id: toastId });
     } finally {
-      setSubiendoPdfWhatsapp(false);
+      setSubiendoImagenWhatsapp(false);
     }
   };
 
@@ -1354,7 +1358,7 @@ export function ListadoCobros() {
               <div className="flex flex-wrap justify-end gap-2 pt-3 border-t border-slate-100">
                 <button
                   type="button"
-                  disabled={subiendoPdfWhatsapp}
+                  disabled={subiendoImagenWhatsapp}
                   onClick={() => setModalWhatsappData(null)}
                   className="px-3.5 py-2.5 rounded-xl font-bold text-slate-600 hover:bg-slate-100 text-xs cursor-pointer disabled:opacity-50"
                 >
@@ -1362,24 +1366,24 @@ export function ListadoCobros() {
                 </button>
                 <button
                   type="submit"
-                  disabled={subiendoPdfWhatsapp}
+                  disabled={subiendoImagenWhatsapp}
                   className="px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
                   <MessageCircle size={14} /> Solo Texto
                 </button>
                 <button
                   type="button"
-                  disabled={subiendoPdfWhatsapp}
-                  onClick={handleEnviarPdfCloudinaryWhatsapp}
+                  disabled={subiendoImagenWhatsapp}
+                  onClick={handleEnviarImagenCloudinaryWhatsapp}
                   className="px-4 py-2.5 bg-[#25D366] hover:bg-[#1ebe5d] text-white font-bold rounded-xl shadow-lg shadow-emerald-600/20 text-xs flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
                 >
-                  {subiendoPdfWhatsapp ? (
+                  {subiendoImagenWhatsapp ? (
                     <>
-                      <Loader2 size={14} className="animate-spin" /> Subiendo PDF...
+                      <Loader2 size={14} className="animate-spin" /> Subiendo Imagen...
                     </>
                   ) : (
                     <>
-                      <Printer size={14} /> Enviar Enlace PDF
+                      <Printer size={14} /> Enviar Imagen Recibo
                     </>
                   )}
                 </button>

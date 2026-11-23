@@ -59,9 +59,9 @@ export async function actualizarCobrosLote(items) {
   return handleResponse(res);
 }
 
-export async function subirReciboPdfCloudinary(pdfBlob, nombreArchivo) {
+export async function subirReciboImagenCloudinary(imagenBlob, nombreArchivo = 'recibo.png') {
   const formData = new FormData();
-  formData.append('recibo', pdfBlob, nombreArchivo);
+  formData.append('recibo', imagenBlob, nombreArchivo);
 
   const headers = getAuthHeaders();
   delete headers['Content-Type'];
