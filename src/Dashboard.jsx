@@ -7,7 +7,6 @@ import {
   Settings, 
   LogOut, 
   Menu,
-  AlertCircle,
   Plus,
   ChevronDown,
   ChevronRight,
@@ -20,6 +19,7 @@ import {
 } from 'lucide-react';
 
 // Importación de submódulos
+import { CalendarioCobrosInicio } from './components/cobros/CalendarioCobrosInicio';
 import { NuevoEdificio } from './components/edificios/NuevoEdificio';
 import { ListadoEdificios } from './components/edificios/ListadoEdificios';
 import { NuevoDepartamento } from './components/departamentos/NuevoDepartamento';
@@ -72,7 +72,9 @@ export function Dashboard({ setIsAuthenticated }) {
   };
 
   const nombreRol = esPropietario ? 'Propietario' : esAdmin ? 'Administrador' : 'Conserje';
-  const nombreUsuario = usuarioSesion?.nombre ? `${usuarioSesion.nombre} ${usuarioSesion.primer_apellido || ''}`.trim() : nombreRol;
+  const nombreUsuario = usuarioSesion?.nombre
+    ? `${usuarioSesion.nombre} ${usuarioSesion.primer_apellido || ''}`.trim()
+    : nombreRol;
 
   return (
     <div className="flex h-screen bg-slate-50 font-sans overflow-hidden">
@@ -388,67 +390,39 @@ export function Dashboard({ setIsAuthenticated }) {
         </header>
 
         {/* CONTENIDO PRINCIPAL */}
-        <main className="flex-1 overflow-y-auto p-8 bg-slate-50">
+        <main className="flex-1 overflow-y-auto p-6 md:p-8 bg-slate-50">
           
-          {/* INICIO */}
+          {/* INICIO CON CALENDARIO MENSUAL DE COBROS */}
           {activeMenu === 'Inicio' && !esConserje && (
-            <div className="space-y-8">
-              <div className="flex justify-between items-center">
+            <div className="space-y-6">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-extrabold text-slate-800">Panel General de Gestión</h2>
-                  <p className="text-sm text-slate-500">Bienvenido al sistema de administración residencial.</p>
+                  <p className="text-sm text-slate-500">Control mensual de vencimientos, contratos activos y cobranzas.</p>
                 </div>
                 
-                <div className="flex gap-3">
+                <div className="flex flex-wrap gap-3">
                   <button
-                    onClick={() => { setIsEdificiosOpen(true); setActiveMenu('Registrar Edificio'); }}
-                    className="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 text-white px-5 py-3 rounded-xl font-bold transition-all"
+                    onClick={() => { setIsContratosOpen(true); setActiveMenu('Registrar Contrato'); }}
+                    className="flex items-center gap-2 bg-slate-800 hover:bg-slate-900 text-white px-4 py-2.5 rounded-xl text-sm font-bold transition-all cursor-pointer"
                   >
-                    <Building2 size={18} /> Nuevo Edificio
+                    <FileText size={17} /> Nuevo Contrato
                   </button>
                   <button
-                    onClick={() => { setIsUnidadesOpen(true); setActiveMenu('Registrar Unidad'); }}
-                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-5 py-3 rounded-xl font-bold shadow-lg shadow-blue-600/20 transition-all"
+                    onClick={() => { setIsCobrosOpen(true); setActiveMenu('Lista de Cobros'); }}
+                    className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-xl text-sm font-bold shadow-lg shadow-blue-600/20 transition-all cursor-pointer"
                   >
-                    <Plus size={20} /> Nueva Unidad
+                    <Wallet size={17} /> Ir a Cobros
                   </button>
                 </div>
               </div>
 
-              {/* Estadísticas */}
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="p-3 bg-blue-50 rounded-xl text-blue-600"><Building2 size={24} /></div>
-                  </div>
-                  <h3 className="text-slate-500 text-sm font-semibold mb-1">Unidades Registradas</h3>
-                  <p className="text-3xl font-extrabold text-slate-800">En Sistema</p>
-                </div>
-
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="p-3 bg-emerald-50 rounded-xl text-emerald-600"><Wallet size={24} /></div>
-                  </div>
-                  <h3 className="text-slate-500 text-sm font-semibold mb-1">Cobranzas Activas</h3>
-                  <p className="text-3xl font-extrabold text-slate-800">Al Día</p>
-                </div>
-
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="p-3 bg-orange-50 rounded-xl text-orange-500"><AlertCircle size={24} /></div>
-                  </div>
-                  <h3 className="text-slate-500 text-sm font-semibold mb-1">Mantenimientos</h3>
-                  <p className="text-3xl font-extrabold text-slate-800">Pendientes</p>
-                </div>
-
-                <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-100">
-                  <div className="flex justify-between items-start mb-4">
-                    <div className="p-3 bg-purple-50 rounded-xl text-purple-600"><Users size={24} /></div>
-                  </div>
-                  <h3 className="text-slate-500 text-sm font-semibold mb-1">Personal</h3>
-                  <p className="text-3xl font-extrabold text-slate-800">Activo</p>
-                </div>
-              </div>
+              <CalendarioCobrosInicio
+                onIrACobros={() => {
+                  setIsCobrosOpen(true);
+                  setActiveMenu('Lista de Cobros');
+                }}
+              />
             </div>
           )}
 

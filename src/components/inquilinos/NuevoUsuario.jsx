@@ -9,10 +9,13 @@ import {
   Activity, 
   Users, 
   Building2,
+  Globe,
+  Loader2,
   X 
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { BASE_URL, getAuthHeaders, handleResponse } from '../../api/config';
+import { crearUsuario, actualizarUsuario } from '../../services/usuarioService';
 
 export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
   const [edificios, setEdificios] = useState([]);
@@ -24,10 +27,11 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
     primer_apellido: '',
     segundo_apellido: '',
     ci_nit: '',
+    nacionalidad: 'Boliviana',
     email: '',
     telefono: '',
     password: '',
-    rol: '2', // 1 = Propietario, 2 = Administrador, 3 = Conserje
+    rol: '2', // 1 = Propietario, 2 = Administrador, 3 = Conserje, 4 = Inquilino
     estado: 'ACTIVO'
   });
 
@@ -39,17 +43,23 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
 
   useEffect(() => {
     if (usuarioAEditar) {
+      const rolNum = Number(usuarioAEditar.rol || 4);
+      const emailUsuario = (usuarioAEditar.email || '').toLowerCase();
+      const rolNormalizado =
+        rolNum === 3 && emailUsuario.startsWith('inquilino_') ? 4 : rolNum;
+
       setFormData({
         id_edificio: usuarioAEditar.id_edificio || '',
         nombre: usuarioAEditar.nombre || '',
         primer_apellido: usuarioAEditar.primer_apellido || '',
         segundo_apellido: usuarioAEditar.segundo_apellido || '',
         ci_nit: usuarioAEditar.ci_nit || '',
+        nacionalidad: usuarioAEditar.nacionalidad || 'Boliviana',
         email: usuarioAEditar.email || '',
         telefono: usuarioAEditar.telefono || '',
         password: '',
-        rol: String(usuarioAEditar.rol || '2'),
-        estado: usuarioAEditar.estado || 'ACTIVO'
+        rol: String(rolNormalizado),
+        estado: (usuarioAEditar.estado || 'ACTIVO').toUpperCase()
       });
     }
   }, [usuarioAEditar]);
@@ -85,14 +95,12 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
     const id = usuarioAEditar?.id_usuario || usuarioAEditar?.id;
     const toastId = toast.loading(isEdit ? 'Actualizando usuario...' : 'Registrando usuario...');
 
-    const url = isEdit ? `${BASE_URL}/usuarios/${id}` : `${BASE_URL}/usuarios`;
-    const method = isEdit ? 'PATCH' : 'POST';
-
     const payload = {
       nombre: formData.nombre.trim(),
       primer_apellido: formData.primer_apellido.trim(),
       segundo_apellido: formData.segundo_apellido?.trim() || null,
       ci_nit: formData.ci_nit.trim(),
+      nacionalidad: formData.nacionalidad?.trim() || 'Boliviana',
       email: formData.email.trim().toLowerCase(),
       telefono: formData.telefono?.trim() || null,
       rol: Number(formData.rol),
@@ -105,13 +113,10 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
     }
 
     try {
-      const response = await fetch(url, {
-        method,
-        headers: getAuthHeaders(),
-        body: JSON.stringify(payload),
-      });
+      const data = isEdit
+        ? await actualizarUsuario(id, payload)
+        : await crearUsuario(payload);
 
-      const data = await handleResponse(response);
       toast.success(isEdit ? '¡Usuario actualizado!' : '¡Usuario registrado correctamente!', { id: toastId });
 
       if (onSave) onSave(data);
@@ -124,7 +129,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
   };
 
   return (
-    <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden max-w-3xl mx-auto relative">
+    <div className="bg-white rounded-2xl shadow-xl border border-slate-100 overflow-hidden max-w-3xl mx-auto relative animate-fade-in">
       
       {/* Cabecera */}
       <div className="bg-slate-900 px-8 py-6 text-white flex items-center justify-between">
@@ -141,7 +146,11 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
         </div>
 
         {onClose && (
-          <button type="button" onClick={onClose} className="text-slate-400 hover:text-white p-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-slate-400 hover:text-white p-2 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer"
+          >
             <X size={20} />
           </button>
         )}
@@ -174,7 +183,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
 
         {/* Nombres */}
         <div>
-          <label className="block text-sm font-bold text-slate-700 mb-2">Nombre(s)</label>
+          <label className="block text-sm font-bold text-slate-700 mb-2">Nombre(s) *</label>
           <div className="relative flex items-center group">
             <User size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
             <input
@@ -193,7 +202,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
         {/* Apellidos */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Primer Apellido</label>
+            <label className="block text-sm font-bold text-slate-700 mb-2">Primer Apellido *</label>
             <input
               type="text"
               name="primer_apellido"
@@ -220,10 +229,10 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
           </div>
         </div>
 
-        {/* CI/NIT y Teléfono */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        {/* CI/NIT, Nacionalidad y Teléfono */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">C.I. / NIT</label>
+            <label className="block text-sm font-bold text-slate-700 mb-2">C.I. / NIT *</label>
             <div className="relative flex items-center group">
               <CreditCard size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
               <input
@@ -235,6 +244,23 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
                 value={formData.ci_nit}
                 onChange={handleChange}
                 className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-bold"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-bold text-slate-700 mb-2">Nacionalidad *</label>
+            <div className="relative flex items-center group">
+              <Globe size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
+              <input
+                type="text"
+                name="nacionalidad"
+                required
+                maxLength={60}
+                placeholder="Ej. Boliviana"
+                value={formData.nacionalidad}
+                onChange={handleChange}
+                className="w-full py-3.5 pl-11 pr-4 border-2 border-slate-200 rounded-xl text-slate-900 bg-slate-50 outline-none transition-all focus:border-blue-600 focus:bg-white font-semibold"
               />
             </div>
           </div>
@@ -258,7 +284,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
 
         {/* Correo Electrónico */}
         <div>
-          <label className="block text-sm font-bold text-slate-700 mb-2">Correo Electrónico (Login)</label>
+          <label className="block text-sm font-bold text-slate-700 mb-2">Correo Electrónico (Login) *</label>
           <div className="relative flex items-center group">
             <Mail size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
             <input
@@ -277,7 +303,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
         {/* Rol y Estado */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 p-5 bg-blue-50/50 border border-blue-100 rounded-xl">
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Rol del Sistema</label>
+            <label className="block text-sm font-bold text-slate-700 mb-2">Rol del Sistema *</label>
             <div className="relative flex items-center group">
               <Shield size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none" />
               <select
@@ -289,12 +315,13 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
                 <option value="1">Propietario (Acceso Total)</option>
                 <option value="2">Administrador (Todo excepto Estados de Cuenta)</option>
                 <option value="3">Conserje (Refacciones y Mantenimiento)</option>
+                <option value="4">Inquilino (Titular / Arrendatario)</option>
               </select>
             </div>
           </div>
 
           <div>
-            <label className="block text-sm font-bold text-slate-700 mb-2">Estado de la Cuenta</label>
+            <label className="block text-sm font-bold text-slate-700 mb-2">Estado de la Cuenta *</label>
             <div className="relative flex items-center group">
               <Activity size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors pointer-events-none" />
               <select
@@ -314,7 +341,7 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
         {/* Contraseña */}
         <div>
           <label className="block text-sm font-bold text-slate-700 mb-2">
-            {usuarioAEditar ? 'Contraseña (dejar en blanco para no modificar)' : 'Contraseña de Acceso'}
+            {usuarioAEditar ? 'Contraseña (dejar en blanco para no modificar)' : 'Contraseña de Acceso *'}
           </label>
           <div className="relative flex items-center group">
             <Lock size={18} className="absolute left-4 text-slate-400 group-focus-within:text-blue-600 transition-colors" />
@@ -337,8 +364,9 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
           {onClose && (
             <button
               type="button"
+              disabled={isSubmitting}
               onClick={onClose}
-              className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors"
+              className="px-6 py-3 rounded-xl font-bold text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
             >
               Cancelar
             </button>
@@ -346,13 +374,20 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-600/20 transition-all disabled:opacity-50"
+            className="px-8 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-lg shadow-blue-600/20 transition-all disabled:opacity-50 flex items-center gap-2 cursor-pointer"
           >
-            {isSubmitting ? 'Guardando...' : usuarioAEditar ? 'Guardar Cambios' : 'Registrar Usuario'}
+            {isSubmitting ? (
+              <>
+                <Loader2 size={18} className="animate-spin" /> Guardando...
+              </>
+            ) : (
+              usuarioAEditar ? 'Guardar Cambios' : 'Registrar Usuario'
+            )}
           </button>
         </div>
 
       </form>
     </div>
   );
+  
 }

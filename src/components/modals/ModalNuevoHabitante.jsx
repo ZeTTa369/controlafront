@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { UserPlus, Edit2, X, CheckCircle2, Globe, Loader2 } from 'lucide-react';
+import { UserPlus, Edit2, X, CheckCircle2, Globe, Loader2, ClipboardList } from 'lucide-react';
 import toast from 'react-hot-toast';
 
 const PARENTESCOS_ESTANDAR = [
@@ -12,6 +12,15 @@ const PARENTESCOS_ESTANDAR = [
   'Tio(a)',
   'Beneficiario / Ocupante Real',
   'Companero(a) de Cuarto',
+];
+
+const OPCIONES_OBSERVACION = [
+  { value: '', label: 'Sin observaciones' },
+  { value: '1 MOTO', label: 'Moto (Especificar modelo/color/#)' },
+  { value: '1 AUTO / VEHICULO', label: 'Auto / Vehículo (Especificar placa/color)' },
+  { value: '1 MASCOTA', label: 'Mascota autorizada' },
+  { value: 'MENOR DE EDAD', label: 'Menor de edad' },
+  { value: 'OTRO', label: 'Otra observación manual' },
 ];
 
 export function ModalNuevoHabitante({
@@ -33,6 +42,10 @@ export function ModalNuevoHabitante({
   const [telefono, setTelefono] = useState('');
   const [esTitular, setEsTitular] = useState('NO');
 
+  // Observaciones
+  const [tipoObservacion, setTipoObservacion] = useState('');
+  const [detalleObservacion, setDetalleObservacion] = useState('');
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -53,6 +66,15 @@ export function ModalNuevoHabitante({
         setParentescoSeleccion('OTRO');
         setParentescoOtro(par);
       }
+
+      const obsActual = (habitanteInicial.observaciones || '').trim();
+      if (!obsActual) {
+        setTipoObservacion('');
+        setDetalleObservacion('');
+      } else {
+        setTipoObservacion('OTRO');
+        setDetalleObservacion(obsActual);
+      }
     } else {
       setNombres('');
       setPrimerApellido('');
@@ -63,10 +85,23 @@ export function ModalNuevoHabitante({
       setParentescoSeleccion('Hijo(a)');
       setParentescoOtro('');
       setEsTitular('NO');
+      setTipoObservacion('');
+      setDetalleObservacion('');
     }
   }, [isOpen, habitanteInicial]);
 
   if (!isOpen) return null;
+
+  const handleSeleccionObservacion = (val) => {
+    setTipoObservacion(val);
+    if (!val) {
+      setDetalleObservacion('');
+    } else if (val !== 'OTRO') {
+      setDetalleObservacion(val);
+    } else {
+      setDetalleObservacion('');
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -86,6 +121,8 @@ export function ModalNuevoHabitante({
         ? parentescoOtro.trim()
         : parentescoSeleccion;
 
+    const observacionFinal = tipoObservacion ? detalleObservacion.trim() : '';
+
     const payload = {
       id_temp: habitanteInicial?.id_temp || Date.now(),
       ...(habitanteInicial?.id_habitante
@@ -98,6 +135,7 @@ export function ModalNuevoHabitante({
       nacionalidad: nacionalidad.trim() || 'Boliviana',
       parentesco: parentescoFinal,
       telefono: telefono.trim(),
+      observaciones: observacionFinal,
       es_titular: parentescoFinal === 'Titular' ? 'SI' : esTitular,
     };
 
@@ -115,6 +153,8 @@ export function ModalNuevoHabitante({
       setParentescoSeleccion('Hijo(a)');
       setParentescoOtro('');
       setEsTitular('NO');
+      setTipoObservacion('');
+      setDetalleObservacion('');
     }
 
     onClose();
@@ -149,8 +189,8 @@ export function ModalNuevoHabitante({
           </button>
         </div>
 
-        {/* Formulario de registro / edicion */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        {/* Formulario */}
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -242,7 +282,7 @@ export function ModalNuevoHabitante({
             </div>
           </div>
 
-          {/* Selector de Parentesco con opcion dinamica OTRO */}
+          {/* Selector de Parentesco */}
           <div className="space-y-3">
             <div>
               <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
@@ -278,6 +318,44 @@ export function ModalNuevoHabitante({
                   value={parentescoOtro}
                   onChange={(e) => setParentescoOtro(e.target.value)}
                   className="w-full bg-white border border-blue-300 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-blue-600"
+                />
+              </div>
+            )}
+          </div>
+
+          {/* Observaciones con opciones rapidas + texto editable */}
+          <div className="space-y-2.5 pt-1">
+            <div>
+              <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                Observaciones (Vehículo, Moto, Mascota, etc.)
+              </label>
+              <div className="relative flex items-center">
+                <ClipboardList size={15} className="absolute left-3.5 text-slate-400 pointer-events-none" />
+                <select
+                  value={tipoObservacion}
+                  onChange={(e) => handleSeleccionObservacion(e.target.value)}
+                  className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-3.5 py-2.5 text-sm font-bold text-slate-800 outline-none focus:border-blue-600 focus:bg-white transition-all appearance-none cursor-pointer"
+                >
+                  {OPCIONES_OBSERVACION.map((op) => (
+                    <option key={op.value} value={op.value}>
+                      {op.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {tipoObservacion && (
+              <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl animate-fade-in">
+                <label className="block text-xs font-extrabold text-amber-900 mb-1">
+                  Detalle de Observación
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ej. 1 MOTO PEGASUS VERDE #3"
+                  value={detalleObservacion}
+                  onChange={(e) => setDetalleObservacion(e.target.value)}
+                  className="w-full bg-white border border-amber-300 rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 outline-none focus:border-amber-600 uppercase"
                 />
               </div>
             )}
