@@ -480,7 +480,7 @@ export function NuevoContrato({ onClose, onSave }) {
       doc.setFontSize(9);
       doc.setTextColor(71, 85, 105);
       const nombresHabitantes = habitantes.map(h => 
-        `${h.nombres} ${h.primer_apellido}${h.ci_nit ? ` (CI: ${h.ci_nit})` : ''} - Nac: ${h.nacionalidad || 'Boliviana'} - ${h.parentesco}`
+        `${h.nombres} ${h.primer_apellido}${h.ci_nit ? ` (CI: ${h.ci_nit})` : ''} - Nac: ${h.nacionalidad || 'Boliviana'} - ${h.parentesco}${h.observaciones ? ` [${h.observaciones}]` : ''}`
       ).join(', ');
       doc.text(`Habitantes: ${nombresHabitantes}`, 28, yPos, { maxWidth: 160 });
       yPos += 8;
@@ -569,17 +569,18 @@ export function NuevoContrato({ onClose, onSave }) {
           primer_apellido: inquilinoData.primer_apellido.trim(),
           segundo_apellido: inquilinoData.segundo_apellido?.trim() || null,
           ci_nit: inquilinoData.ci_nit.trim(),
+          nacionalidad: inquilinoData.nacionalidad?.trim() || 'Boliviana',
           telefono: inquilinoData.telefono?.trim() || null,
           email: inquilinoData.email?.trim() || `inquilino_${inquilinoData.ci_nit}@residencial.com`,
           password: passwordBase,
-          rol: 3,
+          rol: 4, // 4 = Inquilino (también compatible con rol 3 heredado en el listado)
           estado: 'ACTIVO',
         });
 
         idUsuarioFinal = nuevoUser.id_usuario || nuevoUser.id;
       }
 
-      // 2. Armar censo completo de habitantes (Titular + Dependientes) para enviarlo junto con el contrato
+      // 2. Armar censo completo de habitantes (Titular + Dependientes)
       const listaCenso = [];
 
       if (formData.tipo_contrato !== 'TERCEROS') {
@@ -591,6 +592,7 @@ export function NuevoContrato({ onClose, onSave }) {
           nacionalidad: inquilinoData.nacionalidad?.trim() || 'Boliviana',
           parentesco: 'Titular',
           telefono: inquilinoData.telefono?.trim() || null,
+          observaciones: null,
           es_titular: 'SI',
         });
       }
@@ -604,6 +606,7 @@ export function NuevoContrato({ onClose, onSave }) {
           nacionalidad: h.nacionalidad || 'Boliviana',
           parentesco: h.parentesco || 'Familiar',
           telefono: h.telefono || null,
+          observaciones: h.observaciones?.trim() || null,
           es_titular: 'NO',
         });
       });
@@ -615,7 +618,6 @@ export function NuevoContrato({ onClose, onSave }) {
         monto: Number(c.monto) || 0,
       }));
 
-      // Extraer el monto especifico del alquiler (si existe) para monto_renta
       const conceptoAlquiler = listaConceptosActivosOrdenados.find(c => {
         const n = (c.nombre || '').toUpperCase();
         return n.includes('ALQUILER') || n.includes('RENTA') || n.includes('CANON');
@@ -908,6 +910,11 @@ export function NuevoContrato({ onClose, onSave }) {
                       CI: <span className="font-bold text-slate-700">{hab.ci_nit || 'S/C'}</span> • Nac: <span className="font-semibold text-slate-700">{hab.nacionalidad}</span> • <span className="text-blue-600 font-semibold">{hab.parentesco}</span>
                       {hab.telefono && ` • Tel: ${hab.telefono}`}
                     </p>
+                    {hab.observaciones && (
+                      <span className="inline-block mt-1 px-2 py-0.5 bg-amber-50 text-amber-800 border border-amber-200 rounded text-[11px] font-bold">
+                        {hab.observaciones}
+                      </span>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -1059,7 +1066,7 @@ export function NuevoContrato({ onClose, onSave }) {
           )}
         </div>
 
-        {/* 7. DOCUMENTOS DE RESPALDO (CARNETS, CONTRATO ESCANEADO, INVENTARIO) */}
+        {/* 7. DOCUMENTOS DE RESPALDO */}
         <div className="border border-slate-200 rounded-2xl p-6 bg-slate-50/50">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 mb-4">
             <div>
