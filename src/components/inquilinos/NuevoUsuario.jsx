@@ -389,4 +389,5 @@ export function NuevoUsuario({ onClose, onSave, usuarioAEditar = null }) {
       </form>
     </div>
   );
+  
 }
